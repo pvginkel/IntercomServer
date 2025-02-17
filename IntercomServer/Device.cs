@@ -9,6 +9,9 @@ internal class Device(string deviceId)
     public string DeviceId { get; } = deviceId;
     public DeviceConfiguration? Configuration { get; private set; }
     public bool Online { get; set; }
+    public bool RedLed { get; set; }
+    public bool GreenLed { get; set; }
+    public bool State { get; set; }
 
     public void ParseConfiguration(string json)
     {

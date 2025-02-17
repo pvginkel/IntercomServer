@@ -41,62 +41,7 @@ internal class Server : IAsyncDisposable
         {
             try
             {
-                var match = TopicRe.Match(e.ApplicationMessage.Topic);
-                if (!match.Success)
-                {
-                    throw new InvalidOperationException(
-                        $"Cannot parse incoming message topic '{e.ApplicationMessage.Topic}'"
-                    );
-                }
-
-                var deviceId = match.Groups[1].Value;
-                var topic = match.Groups[2].Value;
-
-                lock (_syncRoot)
-                {
-                    if (!_devices.TryGetValue(deviceId, out var device))
-                    {
-                        device = new Device(deviceId);
-                        _devices.Add(deviceId, device);
-                    }
-
-                    switch (topic)
-                    {
-                        case "configuration":
-                            device.ParseConfiguration(
-                                e.ApplicationMessage.ConvertPayloadToString()
-                            );
-                            break;
-                        case "status":
-                            device.Online =
-                                e.ApplicationMessage.ConvertPayloadToString() == "online";
-                            break;
-                        case "set/action":
-                            HandleDeviceAction(
-                                device,
-                                e.ApplicationMessage.ConvertPayloadToString() switch
-                                {
-                                    "click" => DeviceAction.Click,
-                                    "long_click" => DeviceAction.LongClick,
-                                    var action
-                                        => throw new InvalidOperationException(
-                                            $"Unknown device action '{action}'"
-                                        )
-                                }
-                            );
-                            break;
-                        case "stream/out":
-                            HandleDeviceStream(device, e.ApplicationMessage.Payload);
-                            break;
-                        default:
-                            Logger.Debug(
-                                "Ignoring message from device {Device} on topic {Topic}",
-                                deviceId,
-                                topic
-                            );
-                            break;
-                    }
-                }
+                HandleMessage(e);
             }
             catch (Exception ex)
             {
@@ -110,7 +55,7 @@ internal class Server : IAsyncDisposable
 
         await Subscribe("intercom/+/status");
         await Subscribe("intercom/+/configuration");
-        await Subscribe("intercom/+/set/action");
+        await Subscribe("intercom/+/set/+");
         await Subscribe("intercom/+/stream/out");
 
         async Task Subscribe(string topic)
@@ -121,6 +66,82 @@ internal class Server : IAsyncDisposable
                 .Build();
 
             await _client.SubscribeAsync(mqttSubscribeOptions, CancellationToken.None);
+        }
+    }
+
+    private void HandleMessage(MqttApplicationMessageReceivedEventArgs e)
+    {
+        var match = TopicRe.Match(e.ApplicationMessage.Topic);
+        if (!match.Success)
+        {
+            throw new InvalidOperationException(
+                $"Cannot parse incoming message topic '{e.ApplicationMessage.Topic}'"
+            );
+        }
+
+        var deviceId = match.Groups[1].Value;
+        var topic = match.Groups[2].Value;
+
+        lock (_syncRoot)
+        {
+            if (!_devices.TryGetValue(deviceId, out var device))
+            {
+                device = new Device(deviceId);
+                _devices.Add(deviceId, device);
+            }
+
+            switch (topic)
+            {
+                case "configuration":
+                    device.ParseConfiguration(e.ApplicationMessage.ConvertPayloadToString());
+                    break;
+
+                case "status":
+                    device.Online = MatchPayload("online");
+                    break;
+
+                case "set/action":
+                    HandleDeviceAction(
+                        device,
+                        e.ApplicationMessage.ConvertPayloadToString() switch
+                        {
+                            "click" => DeviceAction.Click,
+                            "long_click" => DeviceAction.LongClick,
+                            var action
+                                => throw new InvalidOperationException(
+                                    $"Unknown device action '{action}'"
+                                )
+                        }
+                    );
+                    break;
+
+                case "set/redled":
+                    device.RedLed = MatchPayload("on");
+                    break;
+
+                case "set/greenled":
+                    device.GreenLed = MatchPayload("on");
+                    break;
+
+                case "set/state":
+                    device.State = MatchPayload("on");
+                    break;
+
+                case "stream/out":
+                    HandleDeviceStream(device, e.ApplicationMessage.Payload);
+                    break;
+
+                default:
+                    Logger.Debug(
+                        "Ignoring message from device {Device} on topic {Topic}",
+                        deviceId,
+                        topic
+                    );
+                    break;
+            }
+
+            bool MatchPayload(string value) =>
+                e.ApplicationMessage.ConvertPayloadToString() == value;
         }
     }
 
