@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "IntercomServer": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "MQTT_HOST": "localhost",
+        "MQTT_PORT": "",
+        "MQTT_USERNAME": "",
+        "MQTT_PASSWORD": ""
+      }
+    }
+  }
+}
