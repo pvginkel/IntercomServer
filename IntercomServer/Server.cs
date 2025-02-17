@@ -7,12 +7,13 @@ namespace IntercomServer;
 
 internal class Server : IAsyncDisposable
 {
+    private static readonly ILogger Logger = Log.ForContext<Server>();
     private static readonly Regex TopicRe = new("^intercom/([^/]*)/(.*)$", RegexOptions.Compiled);
 
     private readonly ServerConfiguration _configuration;
     private readonly MqttClientFactory _factory = new();
     private readonly IMqttClient _client;
-    private readonly object _syncRoot = new();
+    private readonly Lock _syncRoot = new();
     private readonly Dictionary<string, Device> _devices = new();
 
     public Server(ServerConfiguration configuration)
@@ -88,7 +89,7 @@ internal class Server : IAsyncDisposable
                             HandleDeviceStream(device, e.ApplicationMessage.Payload);
                             break;
                         default:
-                            Log.Debug(
+                            Logger.Debug(
                                 "Ignoring message from device {Device} on topic {Topic}",
                                 deviceId,
                                 topic
@@ -99,7 +100,7 @@ internal class Server : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Failed to process incoming message");
+                Logger.Error(ex, "Failed to process incoming message");
             }
 
             return Task.CompletedTask;
