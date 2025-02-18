@@ -1,43 +1,41 @@
-﻿using System.Buffers;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using MQTTnet;
+using MQTTnet.Internal;
 using Serilog;
 
 namespace IntercomServer;
 
-internal class Server : IAsyncDisposable
+internal class Server(
+    IMqttClient client,
+    ServerConfiguration configuration,
+    DeviceManager devices,
+    StateManager state
+) : IAsyncDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<Server>();
     private static readonly Regex TopicRe = new("^intercom/([^/]*)/(.*)$", RegexOptions.Compiled);
 
-    private readonly ServerConfiguration _configuration;
     private readonly MqttClientFactory _factory = new();
-    private readonly IMqttClient _client;
-    private readonly Lock _syncRoot = new();
-    private readonly Dictionary<string, Device> _devices = new();
-
-    public Server(ServerConfiguration configuration)
-    {
-        _configuration = configuration;
-        _client = _factory.CreateMqttClient();
-    }
+    private readonly AsyncLock _syncRoot = new();
 
     public async Task Connect()
     {
         var mqttClientOptionsBuilder = new MqttClientOptionsBuilder().WithTcpServer(
-            _configuration.Host,
-            _configuration.Port
+            configuration.Host,
+            configuration.Port
         );
 
-        if (!string.IsNullOrEmpty(_configuration.Username))
+        if (!string.IsNullOrEmpty(configuration.Username))
+        {
             mqttClientOptionsBuilder = mqttClientOptionsBuilder.WithCredentials(
-                _configuration.Username,
-                _configuration.Password
+                configuration.Username,
+                configuration.Password
             );
+        }
 
         var mqttClientOptions = mqttClientOptionsBuilder.Build();
 
-        _client.ApplicationMessageReceivedAsync += e =>
+        client.ApplicationMessageReceivedAsync += e =>
         {
             try
             {
@@ -51,11 +49,11 @@ internal class Server : IAsyncDisposable
             return Task.CompletedTask;
         };
 
-        await _client.ConnectAsync(mqttClientOptions);
+        await client.ConnectAsync(mqttClientOptions);
 
-        await Subscribe("intercom/+/status");
+        await Subscribe("intercom/+/state");
         await Subscribe("intercom/+/configuration");
-        await Subscribe("intercom/+/set/+");
+        await Subscribe("intercom/+/set/action");
         await Subscribe("intercom/+/stream/out");
 
         async Task Subscribe(string topic)
@@ -65,11 +63,11 @@ internal class Server : IAsyncDisposable
                 .WithTopicFilter(f => f.WithTopic(topic))
                 .Build();
 
-            await _client.SubscribeAsync(mqttSubscribeOptions, CancellationToken.None);
+            await client.SubscribeAsync(mqttSubscribeOptions, CancellationToken.None);
         }
     }
 
-    private void HandleMessage(MqttApplicationMessageReceivedEventArgs e)
+    private async void HandleMessage(MqttApplicationMessageReceivedEventArgs e)
     {
         var match = TopicRe.Match(e.ApplicationMessage.Topic);
         if (!match.Success)
@@ -82,13 +80,9 @@ internal class Server : IAsyncDisposable
         var deviceId = match.Groups[1].Value;
         var topic = match.Groups[2].Value;
 
-        lock (_syncRoot)
+        using (await _syncRoot.EnterAsync())
         {
-            if (!_devices.TryGetValue(deviceId, out var device))
-            {
-                device = new Device(deviceId);
-                _devices.Add(deviceId, device);
-            }
+            var device = devices.GetById(deviceId);
 
             switch (topic)
             {
@@ -96,12 +90,12 @@ internal class Server : IAsyncDisposable
                     device.ParseConfiguration(e.ApplicationMessage.ConvertPayloadToString());
                     break;
 
-                case "status":
-                    device.Online = MatchPayload("online");
+                case "state":
+                    device.ParseState(e.ApplicationMessage.ConvertPayloadToString());
                     break;
 
                 case "set/action":
-                    HandleDeviceAction(
+                    await state.HandleDeviceAction(
                         device,
                         e.ApplicationMessage.ConvertPayloadToString() switch
                         {
@@ -115,20 +109,8 @@ internal class Server : IAsyncDisposable
                     );
                     break;
 
-                case "set/redled":
-                    device.RedLed = MatchPayload("on");
-                    break;
-
-                case "set/greenled":
-                    device.GreenLed = MatchPayload("on");
-                    break;
-
-                case "set/state":
-                    device.State = MatchPayload("on");
-                    break;
-
                 case "stream/out":
-                    HandleDeviceStream(device, e.ApplicationMessage.Payload);
+                    device.HandleStreamData(e.ApplicationMessage.Payload);
                     break;
 
                 default:
@@ -139,28 +121,13 @@ internal class Server : IAsyncDisposable
                     );
                     break;
             }
-
-            bool MatchPayload(string value) =>
-                e.ApplicationMessage.ConvertPayloadToString() == value;
         }
-    }
-
-    private void HandleDeviceAction(Device device, DeviceAction action)
-    {
-        throw new NotImplementedException();
-    }
-
-    private void HandleDeviceStream(Device device, ReadOnlySequence<byte> applicationMessagePayload)
-    {
-        throw new NotImplementedException();
     }
 
     public async ValueTask DisposeAsync()
     {
-        var mqttClientDisconnectOptions = _factory.CreateClientDisconnectOptionsBuilder().Build();
+        await client.DisconnectAsync(_factory.CreateClientDisconnectOptionsBuilder().Build());
 
-        await _client.DisconnectAsync(mqttClientDisconnectOptions, CancellationToken.None);
-
-        _client.Dispose();
+        client.Dispose();
     }
 }
