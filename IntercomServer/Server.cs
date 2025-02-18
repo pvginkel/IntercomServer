@@ -9,7 +9,8 @@ internal class Server(
     IMqttClient client,
     ServerConfiguration configuration,
     DeviceManager devices,
-    StateManager state
+    StateManager state,
+    AlarmManager alarmManager
 ) : IAsyncDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<Server>();
@@ -20,6 +21,8 @@ internal class Server(
 
     public async Task Connect()
     {
+        alarmManager.AlarmExpired += AlarmManager_AlarmExpired;
+
         var mqttClientOptionsBuilder = new MqttClientOptionsBuilder().WithTcpServer(
             configuration.Host,
             configuration.Port
@@ -35,18 +38,16 @@ internal class Server(
 
         var mqttClientOptions = mqttClientOptionsBuilder.Build();
 
-        client.ApplicationMessageReceivedAsync += e =>
+        client.ApplicationMessageReceivedAsync += async e =>
         {
             try
             {
-                HandleMessage(e);
+                await HandleMessage(e);
             }
             catch (Exception ex)
             {
                 Logger.Error(ex, "Failed to process incoming message");
             }
-
-            return Task.CompletedTask;
         };
 
         await client.ConnectAsync(mqttClientOptions);
@@ -67,7 +68,22 @@ internal class Server(
         }
     }
 
-    private async void HandleMessage(MqttApplicationMessageReceivedEventArgs e)
+    private async void AlarmManager_AlarmExpired(object? sender, AlarmExpiredEventArgs e)
+    {
+        try
+        {
+            using (await _syncRoot.EnterAsync())
+            {
+                await e.Action();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Error while handling alarm");
+        }
+    }
+
+    private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e)
     {
         var match = TopicRe.Match(e.ApplicationMessage.Topic);
         if (!match.Success)
