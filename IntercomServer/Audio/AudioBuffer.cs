@@ -20,10 +20,10 @@ internal class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan tra
     private readonly int _leadBytes = (int)(format.BytesPerSecond * leadBuffer.TotalSeconds);
     private readonly int _trailBytes = (int)(format.BytesPerSecond * trailBuffer.TotalSeconds);
     private readonly byte[] _buffer = AllocateBuffer(format, leadBuffer, trailBuffer);
-    private int _readOffset;
-    private int _writeOffset;
+    private long _readOffset;
+    private long _writeOffset;
 
-    public int BufferUsed => ((_writeOffset + _buffer.Length) - _readOffset) % _buffer.Length;
+    public int BufferUsed => (int)(_writeOffset - _readOffset);
     public int BufferFree => _buffer.Length - BufferUsed;
 
     public void Reset()
@@ -50,7 +50,7 @@ internal class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan tra
             _readOffset = 0;
             _writeOffset = _leadBytes;
 
-            Array.Fill<byte>(_buffer, 0, 0, _writeOffset);
+            Array.Fill<byte>(_buffer, 0, 0, _leadBytes);
         }
 
         // Copy the sample into our buffer in one or two parts, depending on whether
@@ -60,16 +60,20 @@ internal class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan tra
         if (overflow > 0)
             ShiftReadOffset(overflow);
 
-        var chunk1 = _buffer.Length - _writeOffset;
+        var writeOffset = (int)(_writeOffset % _buffer.Length);
+
+        var chunk1 = _buffer.Length - writeOffset;
         var copy1 = Math.Min((int)data.Length, chunk1);
 
-        data.Slice(0, copy1).CopyTo(_buffer.AsSpan().Slice(_writeOffset));
+        data.Slice(0, copy1).CopyTo(_buffer.AsSpan().Slice(writeOffset));
         ShiftWriteOffset(copy1);
 
-        var copy2 = (int)data.Length - chunk1;
+        var copy2 = (int)data.Length - copy1;
         if (copy2 > 0)
         {
-            data.Slice(copy1).CopyTo(_buffer.AsSpan().Slice(_writeOffset));
+            writeOffset = (int)(_writeOffset % _buffer.Length);
+
+            data.Slice(copy1).CopyTo(_buffer.AsSpan().Slice(writeOffset));
             ShiftWriteOffset(copy2);
         }
     }
@@ -88,16 +92,20 @@ internal class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan tra
 
         var copy = Math.Min(buffer.Length, bufferUsed);
 
-        var chunk1 = _buffer.Length - _readOffset;
+        var readOffset = (int)(_readOffset % _buffer.Length);
+
+        var chunk1 = _buffer.Length - readOffset;
         var copy1 = Math.Min(chunk1, copy);
 
-        _buffer.AsSpan().Slice(_readOffset, copy1).CopyTo(buffer);
+        _buffer.AsSpan().Slice(readOffset, copy1).CopyTo(buffer);
         ShiftReadOffset(copy1);
 
         var copy2 = copy - copy1;
         if (copy2 > 0)
         {
-            _buffer.AsSpan().Slice(_readOffset, copy2).CopyTo(buffer.AsSpan().Slice(copy1));
+            readOffset = (int)(_readOffset % _buffer.Length);
+
+            _buffer.AsSpan().Slice(readOffset, copy2).CopyTo(buffer.AsSpan().Slice(copy1));
             ShiftReadOffset(copy2);
         }
 
@@ -114,7 +122,7 @@ internal class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan tra
             );
         }
 
-        _readOffset = (_readOffset + offset) % _buffer.Length;
+        _readOffset += offset;
 
         if (_readOffset == _writeOffset)
         {
@@ -133,6 +141,6 @@ internal class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan tra
             );
         }
 
-        _writeOffset = (_writeOffset + offset) % _buffer.Length;
+        _writeOffset += offset;
     }
 }
