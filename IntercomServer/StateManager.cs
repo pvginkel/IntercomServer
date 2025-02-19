@@ -2,11 +2,15 @@
 
 namespace IntercomServer;
 
-internal class StateManager(DeviceManager devices, AlarmManager alarmManager, IMqttClient client)
+internal class StateManager(
+    DeviceManager devices,
+    AlarmManager alarmManager,
+    CallManager callManager,
+    IMqttClient client
+)
 {
     private Device? _callingDevice;
     private readonly List<Device> _ringing = [];
-    private readonly List<Device> _inCall = [];
     private IDisposable? _callingAlarm;
 
     public async Task HandleDeviceAction(Device device, DeviceAction action)
@@ -17,9 +21,9 @@ internal class StateManager(DeviceManager devices, AlarmManager alarmManager, IM
         switch (action)
         {
             case DeviceAction.Click:
-                if (_inCall.Contains(device))
+                if (callManager.InCall.Contains(device))
                     await EndCall();
-                else if (_inCall.Count > 0)
+                else if (callManager.InCall.Count > 0)
                     await JoinCall(device);
                 else if (_callingDevice == null)
                     await RequestCall(device);
@@ -91,20 +95,15 @@ internal class StateManager(DeviceManager devices, AlarmManager alarmManager, IM
 
         _ringing.Clear();
 
-        _inCall.Clear();
-        _inCall.Add(_callingDevice);
-        _inCall.Add(device);
+        callManager.StartCall();
 
-        foreach (var item in _inCall)
-        {
-            await item.SetGreenLed(client, Constants.LedOn);
-            await item.SetRecording(client, true);
-        }
+        await JoinCall(_callingDevice);
+        await JoinCall(device);
     }
 
     private async Task JoinCall(Device device)
     {
-        _inCall.Add(device);
+        callManager.AddDevice(device);
 
         await device.SetGreenLed(client, Constants.LedOn);
         await device.SetRecording(client, true);
@@ -124,7 +123,7 @@ internal class StateManager(DeviceManager devices, AlarmManager alarmManager, IM
 
     private async Task EndCall()
     {
-        foreach (var item in _inCall)
+        foreach (var item in callManager.InCall)
         {
             await item.SetGreenLed(client, Constants.LedOff);
             await item.SetRecording(client, false);

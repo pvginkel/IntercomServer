@@ -2,8 +2,6 @@
 
 internal class AlarmManager
 {
-    private readonly Lock _syncRoot = new();
-
     public event EventHandler<AlarmExpiredEventArgs>? AlarmExpired;
 
     public IDisposable SetAlarm(TimeSpan interval, Action action)
@@ -18,26 +16,37 @@ internal class AlarmManager
         );
     }
 
-    public IDisposable SetAlarm(TimeSpan interval, Func<Task> action)
+    public IDisposable SetAlarm(TimeSpan interval, Func<Task> action) =>
+        AddTimer(new TimerState(action, true), interval, Timeout.InfiniteTimeSpan);
+
+    public IDisposable SetInterval(TimeSpan interval, Action action)
     {
-        var state = new TimerState(action);
-
-        state.Timer = new Timer(TimerCallback, state, interval, Timeout.InfiniteTimeSpan);
-
-        return new Finalizer(() =>
-        {
-            lock (_syncRoot)
+        return SetInterval(
+            interval,
+            () =>
             {
-                state.Timer.Dispose();
+                action();
+                return Task.CompletedTask;
             }
-        });
+        );
+    }
+
+    public IDisposable SetInterval(TimeSpan interval, Func<Task> action) =>
+        AddTimer(new TimerState(action, false), interval, interval);
+
+    private IDisposable AddTimer(TimerState state, TimeSpan dueTime, TimeSpan period)
+    {
+        state.Timer = new Timer(TimerCallback, state, dueTime, period);
+
+        return new Finalizer(() => state.Timer.Dispose());
     }
 
     private void TimerCallback(object? state)
     {
         var timerState = (TimerState)state!;
 
-        timerState.Timer!.Dispose();
+        if (timerState.OneShot)
+            timerState.Timer!.Dispose();
 
         OnAlarmExpired(new AlarmExpiredEventArgs(timerState.Action));
     }
@@ -47,9 +56,10 @@ internal class AlarmManager
         AlarmExpired?.Invoke(this, e);
     }
 
-    internal class TimerState(Func<Task> action)
+    internal class TimerState(Func<Task> action, bool oneShot)
     {
         public Func<Task> Action { get; } = action;
+        public bool OneShot { get; } = oneShot;
         public Timer? Timer { get; set; }
     }
 }

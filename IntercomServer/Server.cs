@@ -126,7 +126,7 @@ internal class Server(
                     break;
 
                 case "stream/out":
-                    device.HandleStreamData(e.ApplicationMessage.Payload);
+                    device.AudioBuffer.Append(e.ApplicationMessage.Payload);
                     break;
 
                 default:

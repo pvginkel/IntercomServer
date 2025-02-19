@@ -1,9 +1,8 @@
-﻿using System;
-using System.Buffers;
+﻿using System.Buffers;
 using System.Diagnostics;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using IntercomServer.Audio;
 using MQTTnet;
 
 namespace IntercomServer;
@@ -17,6 +16,9 @@ internal class Device(string deviceId)
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
+
+    public AudioBuffer AudioBuffer { get; } =
+        new(Constants.AudioFormat, Constants.AudioLeadBuffer, Constants.AudioTrailBuffer);
 
     public string DeviceId { get; } = deviceId;
     public DeviceConfiguration? Configuration { get; private set; }
@@ -33,11 +35,6 @@ internal class Device(string deviceId)
     public void ParseState(string json)
     {
         State = JsonSerializer.Deserialize<DeviceState>(json, JsonSerializerOptions);
-    }
-
-    public void HandleStreamData(ReadOnlySequence<byte> applicationMessagePayload)
-    {
-        throw new NotImplementedException();
     }
 
     public async Task SetRedLed(IMqttClient client, DeviceLedAction action)

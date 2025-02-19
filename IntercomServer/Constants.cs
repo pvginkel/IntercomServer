@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using IntercomServer.Audio;
 
 namespace IntercomServer;
 
@@ -19,4 +20,9 @@ internal class Constants
     public static readonly DeviceLedAction LedOff = new(DeviceLedState.Off);
     public static readonly DeviceLedAction LedOn = new(DeviceLedState.On);
     public static readonly TimeSpan AttemptCallDuration = TimeSpan.FromSeconds(15);
+
+    public static readonly AudioFormat AudioFormat = new(AudioChannelLayout.Mono, 16000, 16);
+    public static readonly TimeSpan AudioLeadBuffer = TimeSpan.FromMilliseconds(30);
+    public static readonly TimeSpan AudioTrailBuffer = TimeSpan.FromMilliseconds(70);
+    public static readonly TimeSpan OutStreamInterval = TimeSpan.FromMilliseconds(10);
 }
