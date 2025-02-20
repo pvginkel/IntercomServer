@@ -16,6 +16,14 @@ public record AudioFormat(AudioChannelLayout ChannelLayout, int SampleRate, int 
             return SampleRate * channelBytes * (BitRate / 8);
         }
     }
+
+    public int ChannelCount =>
+        ChannelLayout switch
+        {
+            AudioChannelLayout.Mono => 1,
+            AudioChannelLayout.Stereo => 2,
+            _ => throw new ArgumentOutOfRangeException()
+        };
 };
 
 public enum AudioChannelLayout

@@ -1,4 +1,5 @@
 ﻿using System.Text.RegularExpressions;
+using IntercomServer.Utils;
 using MQTTnet;
 using MQTTnet.Internal;
 using Serilog;
@@ -94,13 +95,41 @@ internal class Server(
             switch (topic)
             {
                 case "configuration":
-                    device.ParseConfiguration(e.ApplicationMessage.ConvertPayloadToString());
+                    var payload = e.ApplicationMessage.ConvertPayloadToString();
+
+                    if (payload == null)
+                    {
+                        devices.Remove(device);
+                        break;
+                    }
+
+                    device.ParseConfiguration(payload);
+
+                    Logger.Information(
+                        "Received configuration for device {Device} configuration {Configuration}",
+                        device.DeviceId,
+                        device.Configuration
+                    );
                     break;
 
                 case "state":
+                    payload = e.ApplicationMessage.ConvertPayloadToString();
+
+                    if (payload == null)
+                    {
+                        devices.Remove(device);
+                        break;
+                    }
+
                     var wasEnabled = device.State?.Enabled == true;
 
-                    device.ParseState(e.ApplicationMessage.ConvertPayloadToString());
+                    device.ParseState(payload);
+
+                    Logger.Information(
+                        "Received state for device {Device} state {State}",
+                        device.DeviceId,
+                        device.State
+                    );
 
                     var isEnabled = device.State?.Enabled == true;
 
@@ -109,18 +138,23 @@ internal class Server(
                     break;
 
                 case "set/action":
-                    await state.HandleDeviceAction(
-                        device,
-                        e.ApplicationMessage.ConvertPayloadToString() switch
-                        {
-                            "click" => DeviceAction.Click,
-                            "long_click" => DeviceAction.LongClick,
-                            var action
-                                => throw new InvalidOperationException(
-                                    $"Unknown device action '{action}'"
-                                )
-                        }
+                    var deviceAction = e.ApplicationMessage.ConvertPayloadToString() switch
+                    {
+                        "click" => DeviceAction.Click,
+                        "long_click" => DeviceAction.LongClick,
+                        var action
+                            => throw new InvalidOperationException(
+                                $"Unknown device action '{action}'"
+                            )
+                    };
+
+                    Logger.Information(
+                        "Received action for device {Device} action {DeviceAction}",
+                        device.DeviceId,
+                        deviceAction
                     );
+
+                    await state.HandleDeviceAction(device, deviceAction);
                     break;
 
                 default:

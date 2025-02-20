@@ -1,0 +1,50 @@
+﻿<UserControl x:Class="IntercomTest.IntercomClientControl"
+             x:ClassModifier="internal"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:IntercomTest"
+             Loaded="UserControl_Loaded"
+             mc:Ignorable="d" 
+             d:DesignWidth="600"
+             d:Background="White">
+    <GroupBox x:Name="_groupBox" Header="Device ID">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Label Content="Recording device:" />
+            <ComboBox x:Name="_recordingDevice" Grid.Column="1" Margin="3"/>
+
+            <Label Content="Playback device:" Grid.Row="1" />
+            <ComboBox x:Name="_playbackDevice" Grid.Row="1" Grid.Column="1" Margin="3"/>
+
+            <StackPanel Orientation="Horizontal" Grid.Row="2" Grid.Column="1" >
+                <Button x:Name="_clickButton" Content="Click" Margin="3" Padding="5,3" Click="_clickButton_Click" />
+                <Button x:Name="_longClickButton" Content="Long Click" Margin="3" Padding="5,3" Click="_longClickButton_Click" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Grid.Row="3" Grid.Column="1" >
+                <Ellipse x:Name="_redLed" Width="16" Height="16" Stroke="Silver" Fill="White" Margin="3"/>
+                <Ellipse x:Name="_greenLed" Width="16" Height="16" Stroke="Silver" Fill="White" Margin="3"/>
+            </StackPanel>
+
+            <CheckBox x:Name="_recording" IsEnabled="False" Grid.Row="4" Grid.Column="1" Content="Recording" Margin="3" />
+            <CheckBox x:Name="_playing" IsEnabled="False" Grid.Row="5" Grid.Column="1" Content="Playing" Margin="3" />
+
+            <Button x:Name="_remove" Content="Remove" Grid.Row="6" Grid.Column="1" HorizontalAlignment="Right" Margin="3" Click="_remove_Click" Padding="5,3" />
+        </Grid>
+    </GroupBox>
+</UserControl>

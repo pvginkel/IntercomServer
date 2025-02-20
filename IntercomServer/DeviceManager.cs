@@ -4,6 +4,8 @@ internal class DeviceManager
 {
     private readonly Dictionary<string, Device> _devices = new();
 
+    public event EventHandler<DeviceEventArgs>? DeviceRemoved;
+
     public Device GetById(string deviceId)
     {
         if (!_devices.TryGetValue(deviceId, out var device))
@@ -28,4 +30,18 @@ internal class DeviceManager
     {
         return GetAllOnline().Where(p => p.State!.Enabled.GetValueOrDefault());
     }
+
+    public void Remove(Device device)
+    {
+        _devices.Remove(device.DeviceId);
+
+        OnDeviceRemoved(new DeviceEventArgs(device));
+    }
+
+    protected virtual void OnDeviceRemoved(DeviceEventArgs e) => DeviceRemoved?.Invoke(this, e);
+}
+
+internal class DeviceEventArgs(Device device) : EventArgs
+{
+    public Device Device { get; } = device;
 }

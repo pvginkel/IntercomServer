@@ -26,6 +26,7 @@ internal class Device(string deviceId)
             {
                 _isPlaying = value;
                 OnIsPlayingChanged();
+                OnStateChanged();
             }
         }
     }
@@ -39,6 +40,7 @@ internal class Device(string deviceId)
             {
                 _isRecording = value;
                 OnIsRecordingChanged();
+                OnStateChanged();
             }
         }
     }
@@ -52,6 +54,7 @@ internal class Device(string deviceId)
             {
                 _redLed = value;
                 OnRedLedChanged();
+                OnStateChanged();
             }
         }
     }
@@ -65,11 +68,13 @@ internal class Device(string deviceId)
             {
                 _greenLed = value;
                 OnGreenLedChanged();
+                OnStateChanged();
             }
         }
     }
 
-    public ImmutableArray<string> SubscribedStreams { get; private set; }
+    public ImmutableArray<string> SubscribedStreams { get; private set; } =
+        ImmutableArray<string>.Empty;
 
     public event EventHandler? IsPlayingChanged;
     public event EventHandler? IsRecordingChanged;
@@ -77,6 +82,7 @@ internal class Device(string deviceId)
     public event EventHandler? GreenLedChanged;
     public event EventHandler<DeviceStreamEventArgs>? SubscribedStream;
     public event EventHandler<DeviceStreamEventArgs>? UnsubscribedStream;
+    public event EventHandler? StateChanged;
 
     public DeviceConfiguration GetConfiguration()
     {
@@ -140,6 +146,7 @@ internal class Device(string deviceId)
 
                 SubscribedStreams = SubscribedStreams.Add(stream);
                 OnSubscribedStream(new DeviceStreamEventArgs(stream));
+                OnStateChanged();
                 break;
 
             case "set/unsubscribe_stream":
@@ -147,6 +154,7 @@ internal class Device(string deviceId)
 
                 SubscribedStreams = SubscribedStreams.Remove(stream);
                 OnUnsubscribedStream(new DeviceStreamEventArgs(stream));
+                OnStateChanged();
                 break;
         }
     }
@@ -187,4 +195,6 @@ internal class Device(string deviceId)
 
     protected virtual void OnUnsubscribedStream(DeviceStreamEventArgs e) =>
         UnsubscribedStream?.Invoke(this, e);
+
+    protected virtual void OnStateChanged() => StateChanged?.Invoke(this, EventArgs.Empty);
 }

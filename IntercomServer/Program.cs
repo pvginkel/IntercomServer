@@ -4,7 +4,11 @@ using Microsoft.Extensions.Hosting;
 using MQTTnet;
 using Serilog;
 
-Log.Logger = new LoggerConfiguration().MinimumLevel.Debug().WriteTo.Console().CreateLogger();
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .WriteTo.Console()
+    .WriteTo.Debug()
+    .CreateLogger();
 
 var builder = new HostBuilder().ConfigureServices(
     (context, services) =>
@@ -25,6 +29,7 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton<DeviceManager>();
         services.AddSingleton<StateManager>();
         services.AddSingleton<MqttClientFactory>();
+        services.AddSingleton<AlarmManager>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());
     }
 );
