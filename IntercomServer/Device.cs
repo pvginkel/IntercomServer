@@ -40,7 +40,7 @@ internal class Device(string deviceId)
     public async Task SetRedLed(IMqttClient client, DeviceLedAction action)
     {
         await client.PublishStringAsync(
-            $"intercom/clients/{DeviceId}/set/red_led",
+            $"intercom/client/{DeviceId}/set/red_led",
             JsonSerializer.Serialize(action, JsonSerializerOptions)
         );
     }
@@ -48,7 +48,7 @@ internal class Device(string deviceId)
     public async Task SetGreenLed(IMqttClient client, DeviceLedAction action)
     {
         await client.PublishStringAsync(
-            $"intercom/clients/{DeviceId}/set/green_led",
+            $"intercom/client/{DeviceId}/set/green_led",
             JsonSerializer.Serialize(action, JsonSerializerOptions)
         );
     }
@@ -56,8 +56,21 @@ internal class Device(string deviceId)
     public async Task SetRecording(IMqttClient client, bool value)
     {
         await client.PublishStringAsync(
-            $"intercom/clients/{DeviceId}/set/recording",
+            $"intercom/client/{DeviceId}/set/recording",
             JsonSerializer.Serialize(value, JsonSerializerOptions)
+        );
+    }
+
+    public async Task SubscribeStream(IMqttClient client, string stream)
+    {
+        await client.PublishStringAsync($"intercom/client/{DeviceId}/set/subscribe_stream", stream);
+    }
+
+    public async Task UnsubscribeStream(IMqttClient client, string stream)
+    {
+        await client.PublishStringAsync(
+            $"intercom/client/{DeviceId}/set/unsubscribe_stream",
+            stream
         );
     }
 }

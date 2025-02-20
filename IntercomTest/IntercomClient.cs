@@ -26,7 +26,7 @@ internal class IntercomClient(Device device, ServerConfiguration configuration)
 
     public async Task Connect()
     {
-        _clientPrefix = $"intercom/clients/{device.DeviceId}/";
+        _clientPrefix = $"intercom/client/{device.DeviceId}/";
         _client = _factory.CreateMqttClient();
 
         var mqttClientOptionsBuilder = new MqttClientOptionsBuilder()
@@ -58,8 +58,8 @@ internal class IntercomClient(Device device, ServerConfiguration configuration)
 
         await _client.ConnectAsync(mqttClientOptions);
 
-        await Subscribe($"intercom/clients/{device.DeviceId}/set/+");
-        await Subscribe($"intercom/clients/{device.DeviceId}/stream/in");
+        await Subscribe($"intercom/client/{device.DeviceId}/set/+");
+        await Subscribe($"intercom/client/{device.DeviceId}/stream/in");
 
         async Task Subscribe(string topic)
         {

@@ -15,7 +15,7 @@ internal class Server(
 {
     private static readonly ILogger Logger = Log.ForContext<Server>();
     private static readonly Regex TopicRe =
-        new("^intercom/clients/([^/]*)/(.*)$", RegexOptions.Compiled);
+        new("^intercom/client/([^/]*)/(.*)$", RegexOptions.Compiled);
 
     private readonly MqttClientFactory _factory = new();
     private readonly AsyncLock _syncRoot = new();
@@ -53,10 +53,10 @@ internal class Server(
 
         await client.ConnectAsync(mqttClientOptions);
 
-        await Subscribe("intercom/clients/+/state");
-        await Subscribe("intercom/clients/+/configuration");
-        await Subscribe("intercom/clients/+/set/action");
-        await Subscribe("intercom/clients/+/stream/out");
+        await Subscribe("intercom/client/+/state");
+        await Subscribe("intercom/client/+/configuration");
+        await Subscribe("intercom/client/+/set/action");
+        await Subscribe("intercom/client/+/stream/out");
 
         async Task Subscribe(string topic)
         {
@@ -108,7 +108,14 @@ internal class Server(
                     break;
 
                 case "state":
+                    var wasEnabled = device.State?.Enabled == true;
+
                     device.ParseState(e.ApplicationMessage.ConvertPayloadToString());
+
+                    var isEnabled = device.State?.Enabled == true;
+
+                    if (wasEnabled != isEnabled)
+                        await DeviceEnabledChanged(device, isEnabled);
                     break;
 
                 case "set/action":
@@ -139,6 +146,14 @@ internal class Server(
                     break;
             }
         }
+    }
+
+    private async Task DeviceEnabledChanged(Device device, bool enabled)
+    {
+        if (enabled)
+            await device.SubscribeStream(client, "intercom/server/stream/global");
+        else
+            await device.UnsubscribeStream(client, "intercom/server/stream/global");
     }
 
     public async ValueTask DisposeAsync()

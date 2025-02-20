@@ -2,16 +2,12 @@
 
 namespace IntercomServer;
 
-internal class StateManager(
-    DeviceManager devices,
-    AlarmManager alarmManager,
-    CallManager callManager,
-    IMqttClient client
-)
+internal class StateManager(DeviceManager devices, AlarmManager alarmManager, IMqttClient client)
 {
     private Device? _callingDevice;
     private readonly List<Device> _ringing = [];
     private IDisposable? _callingAlarm;
+    private readonly List<Device> _inCall = [];
 
     public async Task HandleDeviceAction(Device device, DeviceAction action)
     {
@@ -21,9 +17,9 @@ internal class StateManager(
         switch (action)
         {
             case DeviceAction.Click:
-                if (callManager.InCall.Contains(device))
+                if (_inCall.Contains(device))
                     await EndCall();
-                else if (callManager.InCall.Count > 0)
+                else if (_inCall.Count > 0)
                     await JoinCall(device);
                 else if (_callingDevice == null)
                     await RequestCall(device);
@@ -95,18 +91,26 @@ internal class StateManager(
 
         _ringing.Clear();
 
-        callManager.StartCall();
-
         await JoinCall(_callingDevice);
         await JoinCall(device);
     }
 
     private async Task JoinCall(Device device)
     {
-        callManager.AddDevice(device);
+        // Whenever someone joins the call, they need to subscribe to all other
+        // devices' streams, and all other devices need to subscribe to the new
+        // ones.
+
+        foreach (var item in _inCall)
+        {
+            await item.SubscribeStream(client, $"intercom/client/{device.DeviceId}/stream/out");
+            await device.SubscribeStream(client, $"intercom/client/{item.DeviceId}/stream/out");
+        }
 
         await device.SetGreenLed(client, Constants.LedOn);
         await device.SetRecording(client, true);
+
+        _inCall.Add(device);
     }
 
     private async Task RejectCall()
@@ -123,10 +127,20 @@ internal class StateManager(
 
     private async Task EndCall()
     {
-        foreach (var item in callManager.InCall)
+        foreach (var item in _inCall)
         {
             await item.SetGreenLed(client, Constants.LedOff);
             await item.SetRecording(client, false);
+
+            foreach (var other in _inCall.Where(p => item != p))
+            {
+                await item.UnsubscribeStream(
+                    client,
+                    $"intercom/client/{other.DeviceId}/stream/out"
+                );
+            }
         }
+
+        _inCall.Clear();
     }
 }
