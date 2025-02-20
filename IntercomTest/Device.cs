@@ -2,17 +2,13 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using IntercomServer.Utils;
-using IntercomServer.Utils.Audio;
 using MQTTnet;
 
 namespace IntercomTest;
 
 internal class Device(string deviceId)
 {
-    private readonly AudioMixer _audioMixer = new AudioMixer(
-        Constants.AudioFormat,
-        Constants.BufferInterval
-    );
+    private readonly AudioMixer _audioMixer = new(Constants.AudioFormat, Constants.BufferInterval);
 
     private bool _isPlaying;
     private bool _isRecording;
@@ -111,7 +107,7 @@ internal class Device(string deviceId)
     {
         if (SubscribedStreams.Contains(e.ApplicationMessage.Topic))
         {
-            HandleAudioMessage(e.ApplicationMessage.Topic, e.ApplicationMessage.Payload);
+            AppendAudio(e.ApplicationMessage.Topic, e.ApplicationMessage.Payload);
             return;
         }
 
@@ -123,10 +119,6 @@ internal class Device(string deviceId)
 
         switch (topic)
         {
-            case "stream/in":
-                AppendAudio(e.ApplicationMessage.Payload);
-                break;
-
             case "set/recording":
                 IsRecording = e.ApplicationMessage.ConvertPayloadToString() == "true";
                 break;
@@ -159,35 +151,26 @@ internal class Device(string deviceId)
         }
     }
 
-    private void HandleAudioMessage(string topic, ReadOnlySequence<byte> sample)
+    private void AppendAudio(string topic, ReadOnlySequence<byte> sample)
     {
-        throw new NotImplementedException();
+        _audioMixer.Append(topic, sample);
+
+        IsPlaying = true;
     }
 
     public void Reset()
     {
-        _audioBuffer.Reset();
+        _audioMixer.Reset();
 
         IsPlaying = false;
     }
 
-    private void AppendAudio(ReadOnlySequence<byte> sample)
+    public void TakeAudio(byte[] buffer)
     {
-        _audioBuffer.Append(sample);
-
-        if (!IsPlaying && _audioBuffer.BufferUsedTime >= Constants.BufferInterval)
-            IsPlaying = true;
-    }
-
-    public int TakeAudio(byte[] buffer)
-    {
-        if (_audioBuffer.BufferUsed == 0)
-        {
+        if (!_audioMixer.HasData)
             IsPlaying = false;
-            return 0;
-        }
-
-        return _audioBuffer.Take(buffer);
+        else
+            _audioMixer.Take(buffer);
     }
 
     protected virtual void OnIsPlayingChanged() => IsPlayingChanged?.Invoke(this, EventArgs.Empty);

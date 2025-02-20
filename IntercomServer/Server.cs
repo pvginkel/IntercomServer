@@ -123,10 +123,6 @@ internal class Server(
                     );
                     break;
 
-                case "stream/out":
-                    device.AudioBuffer.Append(e.ApplicationMessage.Payload);
-                    break;
-
                 default:
                     Logger.Debug(
                         "Ignoring message from device {Device} on topic {Topic}",

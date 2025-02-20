@@ -2,7 +2,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using IntercomServer.Utils;
-using IntercomServer.Utils.Audio;
 using MQTTnet;
 
 namespace IntercomServer;
@@ -16,9 +15,6 @@ internal class Device(string deviceId)
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
-
-    public AudioBuffer AudioBuffer { get; } =
-        new(Constants.AudioFormat, Constants.AudioLeadBuffer, Constants.AudioTrailBuffer);
 
     public string DeviceId { get; } = deviceId;
     public DeviceConfiguration? Configuration { get; private set; }

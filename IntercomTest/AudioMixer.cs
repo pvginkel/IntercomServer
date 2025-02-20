@@ -11,7 +11,17 @@ internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
     private long _readOffset;
     private readonly Dictionary<string, long> _writeOffsets = new();
 
-    public void AddSample(string topic, ReadOnlySequence<byte> buffer)
+    public bool HasData => _writeOffsets.Count > 0;
+
+    public void Reset()
+    {
+        _readOffset = 0;
+        _writeOffsets.Clear();
+
+        Array.Clear(_buffer);
+    }
+
+    public void Append(string topic, ReadOnlySequence<byte> buffer)
     {
         // If we don't have a write offset for this topic, we need to
         // start buffering.
