@@ -2,7 +2,11 @@
 
 public static class AudioUtils
 {
-    public static void MixInBuffer(AudioFormat audioFormat, byte[] outBuffer, byte[] inBuffer)
+    public static void MixInBuffer(
+        AudioFormat audioFormat,
+        Span<byte> outBuffer,
+        Span<byte> inBuffer
+    )
     {
         if (audioFormat.BitRate != 16)
         {

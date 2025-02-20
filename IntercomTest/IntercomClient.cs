@@ -22,11 +22,9 @@ internal class IntercomClient(Device device, ServerConfiguration configuration)
     private readonly MqttClientFactory _factory = new();
     private IMqttClient _client = default!;
     private readonly AsyncLock _syncRoot = new();
-    private string _clientPrefix = default!;
 
     public async Task Connect()
     {
-        _clientPrefix = $"intercom/client/{device.DeviceId}/";
         _client = _factory.CreateMqttClient();
 
         var mqttClientOptionsBuilder = new MqttClientOptionsBuilder()
@@ -56,19 +54,35 @@ internal class IntercomClient(Device device, ServerConfiguration configuration)
             }
         };
 
+        device.SubscribedStream += Device_SubscribedStream;
+        device.UnsubscribedStream += Device_UnsubscribedStream;
+
         await _client.ConnectAsync(mqttClientOptions);
 
-        await Subscribe($"intercom/client/{device.DeviceId}/set/+");
-        await Subscribe($"intercom/client/{device.DeviceId}/stream/in");
+        await _client.SubscribeAsync($"intercom/client/{device.DeviceId}/set/+");
+    }
 
-        async Task Subscribe(string topic)
+    private async void Device_SubscribedStream(object? sender, DeviceStreamEventArgs e)
+    {
+        try
         {
-            await _client.SubscribeAsync(
-                _factory
-                    .CreateSubscribeOptionsBuilder()
-                    .WithTopicFilter(f => f.WithTopic(topic))
-                    .Build()
-            );
+            await _client.SubscribeAsync(e.Stream);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to subscribe to stream");
+        }
+    }
+
+    private async void Device_UnsubscribedStream(object? sender, DeviceStreamEventArgs e)
+    {
+        try
+        {
+            await _client.UnsubscribeAsync(e.Stream);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to unsubscribe to stream");
         }
     }
 
@@ -76,15 +90,7 @@ internal class IntercomClient(Device device, ServerConfiguration configuration)
     {
         using (await _syncRoot.EnterAsync())
         {
-            device.HandleMessage(GetTopicSubPath(e.ApplicationMessage.Topic), e);
+            device.HandleMessage(e);
         }
-    }
-
-    private string GetTopicSubPath(string topic)
-    {
-        if (!topic.StartsWith(_clientPrefix))
-            throw new InvalidOperationException("Unexpected topic name");
-
-        return topic[_clientPrefix.Length..];
     }
 }

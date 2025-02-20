@@ -1,4 +1,5 @@
 ﻿using System.Buffers;
+using System.Collections.Immutable;
 using System.Text.Json;
 using IntercomServer.Utils;
 using IntercomServer.Utils.Audio;
@@ -8,8 +9,10 @@ namespace IntercomTest;
 
 internal class Device(string deviceId)
 {
-    private readonly AudioBuffer _audioBuffer =
-        new(Constants.AudioFormat, TimeSpan.Zero, Constants.AudioTrailBuffer);
+    private readonly AudioMixer _audioMixer = new AudioMixer(
+        Constants.AudioFormat,
+        Constants.BufferInterval
+    );
 
     private bool _isPlaying;
     private bool _isRecording;
@@ -70,10 +73,14 @@ internal class Device(string deviceId)
         }
     }
 
+    public ImmutableArray<string> SubscribedStreams { get; private set; }
+
     public event EventHandler? IsPlayingChanged;
     public event EventHandler? IsRecordingChanged;
     public event EventHandler? RedLedChanged;
     public event EventHandler? GreenLedChanged;
+    public event EventHandler<DeviceStreamEventArgs>? SubscribedStream;
+    public event EventHandler<DeviceStreamEventArgs>? UnsubscribedStream;
 
     public DeviceConfiguration GetConfiguration()
     {
@@ -95,12 +102,25 @@ internal class Device(string deviceId)
             RedLed?.State == DeviceLedState.On,
             GreenLed?.State == DeviceLedState.On,
             IsPlaying,
-            IsRecording
+            IsRecording,
+            SubscribedStreams
         );
     }
 
-    public void HandleMessage(string topic, MqttApplicationMessageReceivedEventArgs e)
+    public void HandleMessage(MqttApplicationMessageReceivedEventArgs e)
     {
+        if (SubscribedStreams.Contains(e.ApplicationMessage.Topic))
+        {
+            HandleAudioMessage(e.ApplicationMessage.Topic, e.ApplicationMessage.Payload);
+            return;
+        }
+
+        var clientPrefix = $"intercom/client/{DeviceId}/";
+        if (!e.ApplicationMessage.Topic.StartsWith(clientPrefix))
+            throw new InvalidOperationException("Unexpected topic name");
+
+        var topic = e.ApplicationMessage.Topic[clientPrefix.Length..];
+
         switch (topic)
         {
             case "stream/in":
@@ -122,7 +142,26 @@ internal class Device(string deviceId)
                     e.ApplicationMessage.ConvertPayloadToString()
                 )!;
                 break;
+
+            case "set/subscribe_stream":
+                var stream = e.ApplicationMessage.ConvertPayloadToString();
+
+                SubscribedStreams = SubscribedStreams.Add(stream);
+                OnSubscribedStream(new DeviceStreamEventArgs(stream));
+                break;
+
+            case "set/unsubscribe_stream":
+                stream = e.ApplicationMessage.ConvertPayloadToString();
+
+                SubscribedStreams = SubscribedStreams.Remove(stream);
+                OnUnsubscribedStream(new DeviceStreamEventArgs(stream));
+                break;
         }
+    }
+
+    private void HandleAudioMessage(string topic, ReadOnlySequence<byte> sample)
+    {
+        throw new NotImplementedException();
     }
 
     public void Reset()
@@ -159,4 +198,10 @@ internal class Device(string deviceId)
     protected virtual void OnRedLedChanged() => RedLedChanged?.Invoke(this, EventArgs.Empty);
 
     protected virtual void OnGreenLedChanged() => GreenLedChanged?.Invoke(this, EventArgs.Empty);
+
+    protected virtual void OnSubscribedStream(DeviceStreamEventArgs e) =>
+        SubscribedStream?.Invoke(this, e);
+
+    protected virtual void OnUnsubscribedStream(DeviceStreamEventArgs e) =>
+        UnsubscribedStream?.Invoke(this, e);
 }

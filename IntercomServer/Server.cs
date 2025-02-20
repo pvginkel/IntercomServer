@@ -53,20 +53,10 @@ internal class Server(
 
         await client.ConnectAsync(mqttClientOptions);
 
-        await Subscribe("intercom/client/+/state");
-        await Subscribe("intercom/client/+/configuration");
-        await Subscribe("intercom/client/+/set/action");
-        await Subscribe("intercom/client/+/stream/out");
-
-        async Task Subscribe(string topic)
-        {
-            await client.SubscribeAsync(
-                _factory
-                    .CreateSubscribeOptionsBuilder()
-                    .WithTopicFilter(f => f.WithTopic(topic))
-                    .Build()
-            );
-        }
+        await client.SubscribeAsync("intercom/client/+/state");
+        await client.SubscribeAsync("intercom/client/+/configuration");
+        await client.SubscribeAsync("intercom/client/+/set/action");
+        await client.SubscribeAsync("intercom/client/+/stream/out");
     }
 
     private async void AlarmManager_AlarmExpired(object? sender, AlarmExpiredEventArgs e)
