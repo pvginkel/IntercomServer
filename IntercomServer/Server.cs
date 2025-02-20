@@ -59,12 +59,12 @@ internal class Server(
 
         async Task Subscribe(string topic)
         {
-            var mqttSubscribeOptions = _factory
-                .CreateSubscribeOptionsBuilder()
-                .WithTopicFilter(f => f.WithTopic(topic))
-                .Build();
-
-            await client.SubscribeAsync(mqttSubscribeOptions, CancellationToken.None);
+            await client.SubscribeAsync(
+                _factory
+                    .CreateSubscribeOptionsBuilder()
+                    .WithTopicFilter(f => f.WithTopic(topic))
+                    .Build()
+            );
         }
     }
 

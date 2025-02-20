@@ -1,6 +1,6 @@
-﻿namespace IntercomServer.Audio;
+﻿namespace IntercomServer.Utils.Audio;
 
-internal static class AudioUtils
+public static class AudioUtils
 {
     public static void MixInBuffer(AudioFormat audioFormat, byte[] outBuffer, byte[] inBuffer)
     {

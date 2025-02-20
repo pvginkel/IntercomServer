@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IntercomServer", "IntercomS
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IntercomTest", "IntercomTest\IntercomTest.csproj", "{7A6AE997-D7D1-485E-A37E-573B416832AD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IntercomServer.Utils", "IntercomServer.Utils\IntercomServer.Utils.csproj", "{542226C3-4964-4ADB-B381-2271183268FB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{7A6AE997-D7D1-485E-A37E-573B416832AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7A6AE997-D7D1-485E-A37E-573B416832AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7A6AE997-D7D1-485E-A37E-573B416832AD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{542226C3-4964-4ADB-B381-2271183268FB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{542226C3-4964-4ADB-B381-2271183268FB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{542226C3-4964-4ADB-B381-2271183268FB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{542226C3-4964-4ADB-B381-2271183268FB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

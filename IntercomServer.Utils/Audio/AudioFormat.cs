@@ -1,6 +1,6 @@
-﻿namespace IntercomServer.Audio;
+﻿namespace IntercomServer.Utils.Audio;
 
-internal record AudioFormat(AudioChannelLayout ChannelLayout, int SampleRate, int BitRate)
+public record AudioFormat(AudioChannelLayout ChannelLayout, int SampleRate, int BitRate)
 {
     public int BytesPerSecond
     {
@@ -18,7 +18,7 @@ internal record AudioFormat(AudioChannelLayout ChannelLayout, int SampleRate, in
     }
 };
 
-internal enum AudioChannelLayout
+public enum AudioChannelLayout
 {
     Mono,
     Stereo

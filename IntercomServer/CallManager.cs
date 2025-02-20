@@ -1,7 +1,7 @@
 ﻿using System.Buffers;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using IntercomServer.Audio;
+using IntercomServer.Utils.Audio;
 using MQTTnet;
 
 namespace IntercomServer;

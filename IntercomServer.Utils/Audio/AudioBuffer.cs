@@ -1,8 +1,8 @@
 ﻿using System.Buffers;
 
-namespace IntercomServer.Audio;
+namespace IntercomServer.Utils.Audio;
 
-internal class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan trailBuffer)
+public class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan trailBuffer)
 {
     private static byte[] AllocateBuffer(
         AudioFormat format,
@@ -24,7 +24,14 @@ internal class AudioBuffer(AudioFormat format, TimeSpan leadBuffer, TimeSpan tra
     private long _writeOffset;
 
     public int BufferUsed => (int)(_writeOffset - _readOffset);
+
+    public TimeSpan BufferUsedTime =>
+        TimeSpan.FromSeconds((double)BufferUsed / format.BytesPerSecond);
+
     public int BufferFree => _buffer.Length - BufferUsed;
+
+    public TimeSpan BufferFreeTime =>
+        TimeSpan.FromSeconds((double)BufferFree / format.BytesPerSecond);
 
     public void Reset()
     {

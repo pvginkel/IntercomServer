@@ -1,8 +1,8 @@
-﻿using System.Buffers;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using IntercomServer.Audio;
+using IntercomServer.Utils;
+using IntercomServer.Utils.Audio;
 using MQTTnet;
 
 namespace IntercomServer;
@@ -60,44 +60,4 @@ internal class Device(string deviceId)
             JsonSerializer.Serialize(value, JsonSerializerOptions)
         );
     }
-}
-
-internal record DeviceConfiguration(
-    string? UniqueId,
-    DeviceAudioFormats? AudioFormats,
-    DeviceDeviceConfiguration? Device
-);
-
-internal record DeviceAudioFormats(DeviceAudioFormat? In, DeviceAudioFormat? Out);
-
-internal record DeviceAudioFormat(string? ChannelLayout, int? SampleRate, int? BitRate);
-
-internal record DeviceDeviceConfiguration(string? Manufacturer, string? Model, string? Name);
-
-internal record DeviceState(
-    bool? Online,
-    bool? Enabled,
-    bool? RedLed,
-    bool? GreenLed,
-    bool? Playing,
-    bool? Recording
-);
-
-internal record DeviceLedAction(
-    DeviceLedState State,
-    int? Duration = null,
-    int? On = null,
-    int? Off = null
-);
-
-internal enum DeviceLedState
-{
-    [JsonStringEnumMemberName("on")]
-    On,
-
-    [JsonStringEnumMemberName("off")]
-    Off,
-
-    [JsonStringEnumMemberName("blink")]
-    Blink
 }
