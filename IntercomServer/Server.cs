@@ -14,7 +14,8 @@ internal class Server(
 ) : IAsyncDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<Server>();
-    private static readonly Regex TopicRe = new("^intercom/([^/]*)/(.*)$", RegexOptions.Compiled);
+    private static readonly Regex TopicRe =
+        new("^intercom/clients/([^/]*)/(.*)$", RegexOptions.Compiled);
 
     private readonly MqttClientFactory _factory = new();
     private readonly AsyncLock _syncRoot = new();
@@ -52,10 +53,10 @@ internal class Server(
 
         await client.ConnectAsync(mqttClientOptions);
 
-        await Subscribe("intercom/+/state");
-        await Subscribe("intercom/+/configuration");
-        await Subscribe("intercom/+/set/action");
-        await Subscribe("intercom/+/stream/out");
+        await Subscribe("intercom/clients/+/state");
+        await Subscribe("intercom/clients/+/configuration");
+        await Subscribe("intercom/clients/+/set/action");
+        await Subscribe("intercom/clients/+/stream/out");
 
         async Task Subscribe(string topic)
         {

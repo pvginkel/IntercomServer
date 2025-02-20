@@ -20,11 +20,13 @@ internal class IntercomClient(Device device, ServerConfiguration configuration)
     private static readonly ILogger Logger = Log.ForContext<IntercomClient>();
 
     private readonly MqttClientFactory _factory = new();
-    private IMqttClient _client;
+    private IMqttClient _client = default!;
     private readonly AsyncLock _syncRoot = new();
+    private string _clientPrefix = default!;
 
     public async Task Connect()
     {
+        _clientPrefix = $"intercom/clients/{device.DeviceId}/";
         _client = _factory.CreateMqttClient();
 
         var mqttClientOptionsBuilder = new MqttClientOptionsBuilder()
@@ -56,8 +58,8 @@ internal class IntercomClient(Device device, ServerConfiguration configuration)
 
         await _client.ConnectAsync(mqttClientOptions);
 
-        await Subscribe($"intercom/{device.DeviceId}/set/+");
-        await Subscribe($"intercom/{device.DeviceId}/stream/in");
+        await Subscribe($"intercom/clients/{device.DeviceId}/set/+");
+        await Subscribe($"intercom/clients/{device.DeviceId}/stream/in");
 
         async Task Subscribe(string topic)
         {
@@ -80,12 +82,9 @@ internal class IntercomClient(Device device, ServerConfiguration configuration)
 
     private string GetTopicSubPath(string topic)
     {
-        var pos = topic.IndexOf('/');
-        if (pos == -1)
+        if (!topic.StartsWith(_clientPrefix))
             throw new InvalidOperationException("Unexpected topic name");
-        var pos1 = topic.IndexOf('/', pos + 1);
-        if (pos1 == -1)
-            throw new InvalidOperationException("Unexpected topic name");
-        return topic.Substring(pos1 + 1);
+
+        return topic[_clientPrefix.Length..];
     }
 }

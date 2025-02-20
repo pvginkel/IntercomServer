@@ -96,7 +96,7 @@ internal class CallManager
             }
 
             await _client.PublishBinaryAsync(
-                $"intercom/{_devices[i].DeviceId}/stream/in",
+                $"intercom/clients/{_devices[i].DeviceId}/stream/in",
                 _outBuffer
             );
         }

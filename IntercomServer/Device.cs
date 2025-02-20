@@ -40,7 +40,7 @@ internal class Device(string deviceId)
     public async Task SetRedLed(IMqttClient client, DeviceLedAction action)
     {
         await client.PublishStringAsync(
-            $"intercom/{DeviceId}/set/red_led",
+            $"intercom/clients/{DeviceId}/set/red_led",
             JsonSerializer.Serialize(action, JsonSerializerOptions)
         );
     }
@@ -48,7 +48,7 @@ internal class Device(string deviceId)
     public async Task SetGreenLed(IMqttClient client, DeviceLedAction action)
     {
         await client.PublishStringAsync(
-            $"intercom/{DeviceId}/set/green_led",
+            $"intercom/clients/{DeviceId}/set/green_led",
             JsonSerializer.Serialize(action, JsonSerializerOptions)
         );
     }
@@ -56,7 +56,7 @@ internal class Device(string deviceId)
     public async Task SetRecording(IMqttClient client, bool value)
     {
         await client.PublishStringAsync(
-            $"intercom/{DeviceId}/set/recording",
+            $"intercom/clients/{DeviceId}/set/recording",
             JsonSerializer.Serialize(value, JsonSerializerOptions)
         );
     }
