@@ -107,7 +107,6 @@ internal class StateManager
         }
 
         _callingDevice = null;
-
         _ringing.Clear();
     }
 
@@ -125,10 +124,11 @@ internal class StateManager
             await item.SetRedLed(_client, Constants.LedOff);
         }
 
-        _ringing.Clear();
-
         await JoinCall(_callingDevice);
         await JoinCall(device);
+
+        _callingDevice = null;
+        _ringing.Clear();
     }
 
     private async Task JoinCall(Device device)
@@ -168,7 +168,7 @@ internal class StateManager
 
     private async Task RejectCall()
     {
-        Logger.Information("The call was rejected");
+        Logger.Information("Call was rejected");
 
         if (_callingDevice == null)
             return;
@@ -182,7 +182,7 @@ internal class StateManager
 
     private async Task EndCall()
     {
-        Logger.Information("The call was ended");
+        Logger.Information("Call was ended");
 
         foreach (var item in _inCall)
         {
