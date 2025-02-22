@@ -106,6 +106,8 @@ internal class StateManager
             await item.SetRedLed(_client, Constants.LedOff);
         }
 
+        _callingDevice = null;
+
         _ringing.Clear();
     }
 

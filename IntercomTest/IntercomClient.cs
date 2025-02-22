@@ -11,7 +11,7 @@ namespace IntercomTest;
 
 internal class IntercomClient(Device device, ServerConfiguration configuration) : IAsyncDisposable
 {
-    private static readonly JsonSerializerOptions JsonSerializerOptions =
+    public static readonly JsonSerializerOptions JsonSerializerOptions =
         new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,

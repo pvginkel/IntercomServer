@@ -1,6 +1,10 @@
 ﻿using System.Diagnostics;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Shapes;
 using IntercomServer.Utils;
+using NAudio.CoreAudioApi;
+using NAudio.Mixer;
 using NAudio.Wave;
 using Serilog;
 
@@ -8,9 +12,9 @@ namespace IntercomTest;
 
 internal partial class IntercomClientControl
 {
-    private WaveInEvent? _waveIn;
+    private WasapiCapture? _waveIn;
     private BufferedWaveProvider? _bufferedWaveProvider;
-    private WaveOutEvent? _waveOut;
+    private WasapiOut? _waveOut;
 
     private static readonly ILogger Logger = Log.ForContext<IntercomClientControl>();
 
@@ -31,29 +35,95 @@ internal partial class IntercomClientControl
 
         Device.IsPlayingChanged += Device_IsPlayingChanged;
         Device.IsRecordingChanged += Device_IsRecordingChanged;
+        Device.GreenLedChanged += (_, _) =>
+            TaskUtils.Run(() => UpdateLed(_greenLed, () => Device.GreenLed, Brushes.Green));
+        Device.RedLedChanged += (_, _) =>
+            TaskUtils.Run(() => UpdateLed(_redLed, () => Device.RedLed, Brushes.Red));
 
         _groupBox.Header = Device.DeviceId;
 
         _recordingDevice.Items.Add("");
 
-        for (int i = 0; i < WaveIn.DeviceCount; i++)
-        {
-            var deviceInfo = WaveIn.GetCapabilities(i);
+        var enumerator = new MMDeviceEnumerator();
 
-            _recordingDevice.Items.Add(deviceInfo.ProductName);
+        foreach (
+            var wasapi in enumerator.EnumerateAudioEndPoints(
+                DataFlow.Capture,
+                NAudio.CoreAudioApi.DeviceState.Active
+            )
+        )
+        {
+            _recordingDevice.Items.Add(wasapi.FriendlyName);
         }
 
         _playbackDevice.Items.Add("");
 
-        for (int i = 0; i < WaveOut.DeviceCount; i++)
+        foreach (
+            var wasapi in enumerator.EnumerateAudioEndPoints(
+                DataFlow.Render,
+                NAudio.CoreAudioApi.DeviceState.Active
+            )
+        )
         {
-            var deviceInfo = WaveOut.GetCapabilities(i);
-
-            _playbackDevice.Items.Add(deviceInfo.ProductName);
+            _playbackDevice.Items.Add(wasapi.FriendlyName);
         }
 
         _recordingDevice.SelectedItem = clientConfiguration.RecordingDevice ?? "";
         _playbackDevice.SelectedItem = clientConfiguration.PlaybackDevice ?? "";
+    }
+
+    private async Task UpdateLed(Ellipse led, Func<DeviceLedAction?> func, Brush brush)
+    {
+        var action = func();
+
+        switch (action?.State)
+        {
+            case null:
+                break;
+
+            case DeviceLedState.On:
+                led.Fill = brush;
+
+                if (action.Duration.HasValue)
+                {
+                    await Task.Delay(action.Duration.Value);
+
+                    if (action == func())
+                        led.Fill = Brushes.White;
+                }
+                break;
+
+            case DeviceLedState.Off:
+                led.Fill = Brushes.White;
+                return;
+
+            case DeviceLedState.Blink:
+                var stopwatch = Stopwatch.StartNew();
+
+                while (action == func())
+                {
+                    led.Fill = brush;
+
+                    await Task.Delay(action.On!.Value);
+
+                    if (action != func())
+                        break;
+
+                    led.Fill = Brushes.White;
+
+                    await Task.Delay(action.Off!.Value);
+
+                    if (
+                        action.Duration.HasValue
+                        && stopwatch.ElapsedMilliseconds >= action.Duration.Value
+                    )
+                        return;
+                }
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
     }
 
     private void Device_IsPlayingChanged(object? sender, EventArgs e)
@@ -68,15 +138,8 @@ internal partial class IntercomClientControl
 
     private void StartPlayback()
     {
-        int deviceNumber = -1;
-
-        for (int i = 0; i < WaveOut.DeviceCount; i++)
-        {
-            if (WaveOut.GetCapabilities(i).ProductName == _playbackDevice.Text)
-                deviceNumber = i;
-        }
-
-        if (deviceNumber == -1)
+        var device = GetMMDevice(_playbackDevice.Text, DataFlow.Render);
+        if (device == null)
             return;
 
         _bufferedWaveProvider = new BufferedWaveProvider(
@@ -87,12 +150,29 @@ internal partial class IntercomClientControl
             )
         );
 
-        _waveOut = new WaveOutEvent();
-        _waveOut.DeviceNumber = deviceNumber;
+        _waveOut = new WasapiOut(device, AudioClientShareMode.Shared, true, 10);
         _waveOut.Init(_bufferedWaveProvider);
         _waveOut.Play();
 
         Task.Run(PipeAudio);
+    }
+
+    private MMDevice? GetMMDevice(string friendlyName, DataFlow dataFlow)
+    {
+        var enumerator = new MMDeviceEnumerator();
+
+        foreach (
+            var wasapi in enumerator.EnumerateAudioEndPoints(
+                dataFlow,
+                NAudio.CoreAudioApi.DeviceState.Active
+            )
+        )
+        {
+            if (friendlyName == wasapi.FriendlyName)
+                return wasapi;
+        }
+
+        return null;
     }
 
     private async Task PipeAudio()
@@ -111,6 +191,8 @@ internal partial class IntercomClientControl
                 Device.TakeAudio(buffer);
 
                 _bufferedWaveProvider?.AddSamples(buffer, 0, buffer.Length);
+
+                elapsed += bufferSize;
             }
 
             await Task.Delay(bufferSize);
@@ -138,20 +220,12 @@ internal partial class IntercomClientControl
 
     private void StartRecording()
     {
-        var deviceNumber = -1;
-
-        for (int i = 0; i < WaveIn.DeviceCount; i++)
-        {
-            if (WaveIn.GetCapabilities(i).ProductName == _recordingDevice.Text)
-                deviceNumber = i;
-        }
-
-        if (deviceNumber == -1)
+        var device = GetMMDevice(_recordingDevice.Text, DataFlow.Capture);
+        if (device == null)
             return;
 
-        _waveIn = new WaveInEvent
+        _waveIn = new WasapiCapture(device)
         {
-            DeviceNumber = deviceNumber,
             WaveFormat = new WaveFormat(
                 Constants.AudioFormat.SampleRate,
                 Constants.AudioFormat.BitRate,
@@ -164,10 +238,57 @@ internal partial class IntercomClientControl
         _waveIn.StartRecording();
     }
 
+    private static readonly int MicrophoneGainSampleCount = Constants.AudioFormat.SampleRate * 2;
+    private int _microphoneGainSampleCount;
+    private double _microphoneGainSample;
+
     private async void _waveIn_DataAvailable(object? sender, WaveInEventArgs e)
     {
         try
         {
+            for (int i = 0; i < e.BytesRecorded; i += 2)
+            {
+                var sample = e.Buffer[i] << 8 | e.Buffer[i + 1];
+                double normalizedSample = (sample - 32768) / 32768.0;
+                _microphoneGainSample += normalizedSample * normalizedSample;
+                _microphoneGainSampleCount++;
+
+                if (_microphoneGainSampleCount >= MicrophoneGainSampleCount)
+                {
+                    var rms = Math.Sqrt(_microphoneGainSample / _microphoneGainSampleCount);
+
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        var volumeControl = GetMMDevice(
+                            _recordingDevice.Text,
+                            DataFlow.Capture
+                        )!.AudioEndpointVolume;
+
+                        var volume = volumeControl.MasterVolumeLevelScalar;
+
+                        float newVolume;
+                        if (rms > 0.95)
+                            newVolume = Math.Min(1.0f, volume * 1.1f);
+                        else if (rms < 0.6)
+                            newVolume = Math.Max(0.3f, volume * 0.9f);
+                        else
+                            return;
+
+                        Logger.Information(
+                            "RMS {RMS}, changed volume from {OldVolume} to {NewVolume}",
+                            rms,
+                            volume,
+                            newVolume
+                        );
+
+                        volumeControl.MasterVolumeLevelScalar = newVolume;
+                    });
+
+                    _microphoneGainSample = 0;
+                    _microphoneGainSampleCount = 0;
+                }
+            }
+
             await IntercomClient.SendAudio(e.Buffer.Take(e.BytesRecorded));
         }
         catch (Exception ex)

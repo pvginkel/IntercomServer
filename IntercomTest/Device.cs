@@ -10,6 +10,9 @@ internal class Device(string deviceId)
 {
     private readonly AudioMixer _audioMixer = new(Constants.AudioFormat, Constants.BufferInterval);
 
+    private readonly SynchronizationContext _synchronizationContext =
+        SynchronizationContext.Current!;
+
     private bool _isPlaying;
     private bool _isRecording;
     private DeviceLedAction? _redLed;
@@ -131,13 +134,15 @@ internal class Device(string deviceId)
 
             case "set/red_led":
                 RedLed = JsonSerializer.Deserialize<DeviceLedAction>(
-                    e.ApplicationMessage.ConvertPayloadToString()
+                    e.ApplicationMessage.ConvertPayloadToString(),
+                    IntercomClient.JsonSerializerOptions
                 )!;
                 break;
 
             case "set/green_led":
                 GreenLed = JsonSerializer.Deserialize<DeviceLedAction>(
-                    e.ApplicationMessage.ConvertPayloadToString()
+                    e.ApplicationMessage.ConvertPayloadToString(),
+                    IntercomClient.JsonSerializerOptions
                 )!;
                 break;
 
@@ -181,20 +186,24 @@ internal class Device(string deviceId)
             _audioMixer.Take(buffer);
     }
 
-    protected virtual void OnIsPlayingChanged() => IsPlayingChanged?.Invoke(this, EventArgs.Empty);
+    protected virtual void OnIsPlayingChanged() =>
+        _synchronizationContext.Post(_ => IsPlayingChanged?.Invoke(this, EventArgs.Empty), null);
 
     protected virtual void OnIsRecordingChanged() =>
-        IsRecordingChanged?.Invoke(this, EventArgs.Empty);
+        _synchronizationContext.Post(_ => IsRecordingChanged?.Invoke(this, EventArgs.Empty), null);
 
-    protected virtual void OnRedLedChanged() => RedLedChanged?.Invoke(this, EventArgs.Empty);
+    protected virtual void OnRedLedChanged() =>
+        _synchronizationContext.Post(_ => RedLedChanged?.Invoke(this, EventArgs.Empty), null);
 
-    protected virtual void OnGreenLedChanged() => GreenLedChanged?.Invoke(this, EventArgs.Empty);
+    protected virtual void OnGreenLedChanged() =>
+        _synchronizationContext.Post(_ => GreenLedChanged?.Invoke(this, EventArgs.Empty), null);
 
     protected virtual void OnSubscribedStream(DeviceStreamEventArgs e) =>
-        SubscribedStream?.Invoke(this, e);
+        _synchronizationContext.Post(_ => SubscribedStream?.Invoke(this, e), null);
 
     protected virtual void OnUnsubscribedStream(DeviceStreamEventArgs e) =>
-        UnsubscribedStream?.Invoke(this, e);
+        _synchronizationContext.Post(_ => UnsubscribedStream?.Invoke(this, e), null);
 
-    protected virtual void OnStateChanged() => StateChanged?.Invoke(this, EventArgs.Empty);
+    protected virtual void OnStateChanged() =>
+        _synchronizationContext.Post(_ => StateChanged?.Invoke(this, EventArgs.Empty), null);
 }

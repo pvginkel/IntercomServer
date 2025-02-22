@@ -57,7 +57,6 @@ internal class Server(
         await client.SubscribeAsync("intercom/client/+/state");
         await client.SubscribeAsync("intercom/client/+/configuration");
         await client.SubscribeAsync("intercom/client/+/set/action");
-        await client.SubscribeAsync("intercom/client/+/stream/out");
     }
 
     private async void AlarmManager_AlarmExpired(object? sender, AlarmExpiredEventArgs e)
