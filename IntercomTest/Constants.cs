@@ -5,6 +5,5 @@ namespace IntercomTest;
 internal class Constants
 {
     public static readonly AudioFormat AudioFormat = new(AudioChannelLayout.Mono, 16000, 16);
-    public static readonly TimeSpan AudioTrailBuffer = TimeSpan.FromMilliseconds(400);
-    public static readonly TimeSpan BufferInterval = TimeSpan.FromMilliseconds(200);
+    public static readonly TimeSpan BufferInterval = TimeSpan.FromMilliseconds(100);
 }
