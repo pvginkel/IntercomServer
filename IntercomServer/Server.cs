@@ -120,8 +120,6 @@ internal class Server(
                         break;
                     }
 
-                    var wasEnabled = device.State?.Enabled == true;
-
                     device.ParseState(payload);
 
                     Logger.Information(
@@ -129,11 +127,6 @@ internal class Server(
                         device.DeviceId,
                         device.State
                     );
-
-                    var isEnabled = device.State?.Enabled == true;
-
-                    if (wasEnabled != isEnabled)
-                        await DeviceEnabledChanged(device, isEnabled);
                     break;
 
                 case "set/action":
@@ -165,14 +158,6 @@ internal class Server(
                     break;
             }
         }
-    }
-
-    private async Task DeviceEnabledChanged(Device device, bool enabled)
-    {
-        if (enabled)
-            await device.SubscribeStream(client, "intercom/server/stream/global");
-        else
-            await device.UnsubscribeStream(client, "intercom/server/stream/global");
     }
 
     public async ValueTask DisposeAsync()
