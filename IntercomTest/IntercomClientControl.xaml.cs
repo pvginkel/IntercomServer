@@ -1,10 +1,10 @@
 ﻿using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using IntercomServer.Utils;
 using NAudio.CoreAudioApi;
-using NAudio.Mixer;
 using NAudio.Wave;
 using Serilog;
 
@@ -72,6 +72,17 @@ internal partial class IntercomClientControl
         _playbackDevice.SelectedItem = clientConfiguration.PlaybackDevice ?? "";
     }
 
+    private void UpdateEnabled()
+    {
+        _recording.IsChecked = Device.IsRecording;
+        _recordingDevice.IsEnabled = !Device.IsRecording;
+        _recordingVolume.IsEnabled = _recordingDevice.Text.Length > 0 && Device.IsRecording;
+
+        _playing.IsChecked = Device.IsPlaying;
+        _playbackDevice.IsEnabled = !Device.IsPlaying;
+        _playbackVolume.IsEnabled = _playbackDevice.Text.Length > 0 && Device.IsPlaying;
+    }
+
     private async Task UpdateLed(Ellipse led, Func<DeviceLedAction?> func, Brush brush)
     {
         var action = func();
@@ -128,12 +139,12 @@ internal partial class IntercomClientControl
 
     private void Device_IsPlayingChanged(object? sender, EventArgs e)
     {
-        _playing.IsChecked = Device.IsPlaying;
-
         if (Device.IsPlaying)
             StartPlayback();
         else
             StopPlayback();
+
+        UpdateEnabled();
     }
 
     private void StartPlayback()
@@ -153,6 +164,8 @@ internal partial class IntercomClientControl
         _waveOut = new WasapiOut(device, AudioClientShareMode.Shared, true, 10);
         _waveOut.Init(_bufferedWaveProvider);
         _waveOut.Play();
+
+        _playbackVolume.Value = device.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
 
         Task.Run(PipeAudio);
     }
@@ -210,12 +223,12 @@ internal partial class IntercomClientControl
 
     private void Device_IsRecordingChanged(object? sender, EventArgs e)
     {
-        _recording.IsChecked = Device.IsRecording;
-
         if (Device.IsRecording)
             StartRecording();
         else
             StopRecording();
+
+        UpdateEnabled();
     }
 
     private void StartRecording()
@@ -236,59 +249,14 @@ internal partial class IntercomClientControl
         _waveIn.RecordingStopped += _waveIn_RecordingStopped;
 
         _waveIn.StartRecording();
-    }
 
-    private static readonly int MicrophoneGainSampleCount = Constants.AudioFormat.SampleRate * 2;
-    private int _microphoneGainSampleCount;
-    private double _microphoneGainSample;
+        _recordingVolume.Value = device.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
+    }
 
     private async void _waveIn_DataAvailable(object? sender, WaveInEventArgs e)
     {
         try
         {
-            for (int i = 0; i < e.BytesRecorded; i += 2)
-            {
-                var sample = e.Buffer[i] << 8 | e.Buffer[i + 1];
-                double normalizedSample = (sample - 32768) / 32768.0;
-                _microphoneGainSample += normalizedSample * normalizedSample;
-                _microphoneGainSampleCount++;
-
-                if (_microphoneGainSampleCount >= MicrophoneGainSampleCount)
-                {
-                    var rms = Math.Sqrt(_microphoneGainSample / _microphoneGainSampleCount);
-
-                    Dispatcher.BeginInvoke(() =>
-                    {
-                        var volumeControl = GetMMDevice(
-                            _recordingDevice.Text,
-                            DataFlow.Capture
-                        )!.AudioEndpointVolume;
-
-                        var volume = volumeControl.MasterVolumeLevelScalar;
-
-                        float newVolume;
-                        if (rms > 0.95)
-                            newVolume = Math.Min(1.0f, volume * 1.1f);
-                        else if (rms < 0.6)
-                            newVolume = Math.Max(0.3f, volume * 0.9f);
-                        else
-                            return;
-
-                        Logger.Information(
-                            "RMS {RMS}, changed volume from {OldVolume} to {NewVolume}",
-                            rms,
-                            volume,
-                            newVolume
-                        );
-
-                        volumeControl.MasterVolumeLevelScalar = newVolume;
-                    });
-
-                    _microphoneGainSample = 0;
-                    _microphoneGainSampleCount = 0;
-                }
-            }
-
             await IntercomClient.SendAudio(e.Buffer.Take(e.BytesRecorded));
         }
         catch (Exception ex)
@@ -358,5 +326,33 @@ internal partial class IntercomClientControl
         {
             Logger.Error(ex, "Failed to send action");
         }
+    }
+
+    private void _recordingDevice_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateEnabled();
+
+    private void _playbackDevice_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateEnabled();
+
+    private void _recordingVolume_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e
+    )
+    {
+        GetMMDevice(
+            _recordingDevice.Text,
+            DataFlow.Capture
+        )!.AudioEndpointVolume.MasterVolumeLevelScalar = (float)(e.NewValue / 100.0);
+    }
+
+    private void _playbackVolume_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e
+    )
+    {
+        GetMMDevice(
+            _playbackDevice.Text,
+            DataFlow.Render
+        )!.AudioEndpointVolume.MasterVolumeLevelScalar = (float)(e.NewValue / 100.0);
     }
 }

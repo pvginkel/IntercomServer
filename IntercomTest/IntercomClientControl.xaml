@@ -23,28 +23,36 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <Label Content="Recording device:" />
-            <ComboBox x:Name="_recordingDevice" Grid.Column="1" Margin="3"/>
+            <ComboBox x:Name="_recordingDevice" Grid.Column="1" Margin="3" SelectionChanged="_recordingDevice_SelectionChanged"/>
 
-            <Label Content="Playback device:" Grid.Row="1" />
-            <ComboBox x:Name="_playbackDevice" Grid.Row="1" Grid.Column="1" Margin="3"/>
+            <Label Content="Recording volume:" Grid.Row="1" />
+            <Slider x:Name="_recordingVolume" Grid.Row="1" Grid.Column="1" Margin="3" Maximum="100" LargeChange="10" ValueChanged="_recordingVolume_ValueChanged"/>
 
-            <StackPanel Orientation="Horizontal" Grid.Row="2" Grid.Column="1" >
+            <Label Content="Playback device:" Grid.Row="2" />
+            <ComboBox x:Name="_playbackDevice" Grid.Row="2" Grid.Column="1" Margin="3" SelectionChanged="_playbackDevice_SelectionChanged"/>
+
+            <Label Content="Playback volume:" Grid.Row="3" />
+            <Slider x:Name="_playbackVolume" Grid.Row="3" Grid.Column="1" Margin="3" Maximum="100" LargeChange="10" ValueChanged="_playbackVolume_ValueChanged"/>
+
+            <StackPanel Orientation="Horizontal" Grid.Row="4" Grid.Column="1" >
                 <Button x:Name="_clickButton" Content="Click" Margin="3" Padding="5,3" Click="_clickButton_Click" />
                 <Button x:Name="_longClickButton" Content="Long Click" Margin="3" Padding="5,3" Click="_longClickButton_Click" />
             </StackPanel>
 
-            <StackPanel Orientation="Horizontal" Grid.Row="3" Grid.Column="1" >
+            <StackPanel Orientation="Horizontal" Grid.Row="5" Grid.Column="1" >
                 <Ellipse x:Name="_redLed" Width="16" Height="16" Stroke="Silver" Fill="White" Margin="3"/>
                 <Ellipse x:Name="_greenLed" Width="16" Height="16" Stroke="Silver" Fill="White" Margin="3"/>
             </StackPanel>
 
-            <CheckBox x:Name="_recording" IsEnabled="False" Grid.Row="4" Grid.Column="1" Content="Recording" Margin="3" />
-            <CheckBox x:Name="_playing" IsEnabled="False" Grid.Row="5" Grid.Column="1" Content="Playing" Margin="3" />
+            <CheckBox x:Name="_recording" IsEnabled="False" Grid.Row="6" Grid.Column="1" Content="Recording" Margin="3" />
+            <CheckBox x:Name="_playing" IsEnabled="False" Grid.Row="7" Grid.Column="1" Content="Playing" Margin="3" />
 
-            <Button x:Name="_remove" Content="Remove" Grid.Row="6" Grid.Column="1" HorizontalAlignment="Right" Margin="3" Click="_remove_Click" Padding="5,3" />
+            <Button x:Name="_remove" Content="Remove" Grid.Row="8" Grid.Column="1" HorizontalAlignment="Right" Margin="3" Click="_remove_Click" Padding="5,3" />
         </Grid>
     </GroupBox>
 </UserControl>
