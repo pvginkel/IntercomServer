@@ -26,16 +26,13 @@ public static class AudioUtils
 
         for (int i = 0; i < inBuffer.Length; i += 2)
         {
-            var inSample = (inBuffer[i] << 8) | inBuffer[i + 1];
-            var outSample = (outBuffer[i] << 8) | outBuffer[i + 1];
+            var inSample = (short)(inBuffer[i] | (inBuffer[i + 1] << 8));
+            var outSample = (short)(outBuffer[i] | (outBuffer[i + 1] << 8));
 
-            outSample += inSample;
+            var mixed = Math.Clamp(outSample + inSample, short.MinValue, short.MaxValue);
 
-            if (outSample > ushort.MaxValue)
-                outSample = ushort.MaxValue;
-
-            outBuffer[i] = (byte)(outSample >> 8);
-            outBuffer[i + 1] = (byte)outSample;
+            outBuffer[i] = (byte)mixed;
+            outBuffer[i + 1] = (byte)(mixed >> 8);
         }
     }
 }

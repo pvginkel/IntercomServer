@@ -35,21 +35,21 @@ internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
 
         var available = _buffer.Length - (writeOffset - _readOffset);
         var copy = (int)Math.Min(available, buffer.Length);
-        var span = buffer.Slice(buffer.Length - copy, copy);
+        var source = buffer.Slice(buffer.Length - copy, copy);
 
         var writeOffsetMod = (int)(writeOffset % _buffer.Length);
 
         var chunk1 = Math.Min(_buffer.Length - writeOffsetMod, copy);
-        var span1 = _buffer.AsSpan(writeOffsetMod, chunk1);
+        var target1 = _buffer.AsSpan(writeOffsetMod, chunk1);
 
-        MixAudio(span.Slice(0, chunk1), span1);
+        MixAudio(source.Slice(0, chunk1), target1);
 
         if (chunk1 < copy)
         {
             var chunk2 = copy - chunk1;
-            var span2 = _buffer.AsSpan(0, chunk2);
+            var target2 = _buffer.AsSpan(0, chunk2);
 
-            MixAudio(span.Slice(chunk1), span2);
+            MixAudio(source.Slice(chunk1), target2);
         }
 
         _writeOffsets[topic] = writeOffset + copy;
