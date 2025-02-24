@@ -15,10 +15,16 @@ internal class Constants
         new(DeviceLedState.Blink, Duration: 2000, On: 200, Off: 200);
     public static readonly DeviceLedAction LedOff = new(DeviceLedState.Off);
     public static readonly DeviceLedAction LedOn = new(DeviceLedState.On);
+
     public static readonly TimeSpan AttemptCallDuration = TimeSpan.FromSeconds(15);
+    public static readonly TimeSpan AudioChunkSize = TimeSpan.FromMilliseconds(20);
 
     public static readonly AudioFormat AudioFormat = new(AudioChannelLayout.Mono, 16000, 16);
-    public static readonly TimeSpan AudioLeadBuffer = TimeSpan.FromMilliseconds(30);
-    public static readonly TimeSpan AudioTrailBuffer = TimeSpan.FromMilliseconds(70);
-    public static readonly TimeSpan OutStreamInterval = TimeSpan.FromMilliseconds(10);
+
+    public static class AudioFiles
+    {
+        public const string Doorbell = "doorbell.mp3";
+        public const string Rejected = "rejected.mp3";
+        public const string Ring = "ring.mp3";
+    }
 }

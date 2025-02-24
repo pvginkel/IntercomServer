@@ -159,7 +159,10 @@ internal partial class IntercomClientControl
                 Constants.AudioFormat.BitRate,
                 Constants.AudioFormat.ChannelCount
             )
-        );
+        )
+        {
+            DiscardOnBufferOverflow = true
+        };
 
         _waveOut = new WasapiOut(device, AudioClientShareMode.Shared, true, 10);
         _waveOut.Init(_bufferedWaveProvider);
@@ -192,7 +195,7 @@ internal partial class IntercomClientControl
     {
         var stopwatch = Stopwatch.StartNew();
         var elapsed = TimeSpan.Zero;
-        var bufferSize = TimeSpan.FromMilliseconds(20);
+        var bufferSize = Constants.AudioChunkSize;
         var buffer = new byte[
             (int)(Constants.AudioFormat.BytesPerSecond * bufferSize.TotalSeconds)
         ];

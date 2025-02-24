@@ -1,7 +1,11 @@
-﻿using System.IO;
+﻿using System.Configuration;
+using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Windows;
+using MQTTnet;
+using NAudio.CoreAudioApi;
 using Serilog;
 
 namespace IntercomTest;
@@ -11,6 +15,8 @@ public partial class MainWindow
     private static readonly ILogger Logger = Log.ForContext<MainWindow>();
 
     private readonly ServerConfiguration _configuration;
+    private readonly MqttClientFactory _factory = new();
+    private readonly IMqttClient _client;
 
     public MainWindow()
     {
@@ -26,7 +32,33 @@ public partial class MainWindow
             Password = Environment.GetEnvironmentVariable("MQTT_PASSWORD")
         };
 
+        _client = _factory.CreateMqttClient();
+
         LoadDevices();
+    }
+
+    private async void BaseWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var mqttClientOptionsBuilder = new MqttClientOptionsBuilder()
+                .WithTcpServer(_configuration.Host, _configuration.Port)
+                .WithWillRetain();
+
+            if (!string.IsNullOrEmpty(_configuration.Username))
+            {
+                mqttClientOptionsBuilder = mqttClientOptionsBuilder.WithCredentials(
+                    _configuration.Username,
+                    _configuration.Password
+                );
+            }
+
+            await _client.ConnectAsync(mqttClientOptionsBuilder.Build());
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to connect");
+        }
     }
 
     private void LoadDevices()
@@ -106,5 +138,17 @@ public partial class MainWindow
     private void BaseWindow_Closed(object sender, EventArgs e)
     {
         SaveDeviceConfiguration();
+    }
+
+    private async void _doorbell_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _client.PublishStringAsync("intercom/server/set/ring_doorbell", "true");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to ring doorbell");
+        }
     }
 }

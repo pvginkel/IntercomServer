@@ -6,10 +6,12 @@
         xmlns:local="clr-namespace:IntercomTest"
         mc:Ignorable="d"
         Title="MainWindow" Height="500" Width="700"
-                  Closed="BaseWindow_Closed">
+                  Closed="BaseWindow_Closed"
+                  Loaded="BaseWindow_Loaded">
     <StackPanel Orientation="Vertical">
         <ToolBar>
             <Button x:Name="_addDevice" Content="Add Device" Click="_addDevice_Click" />
+            <Button x:Name="_doorbell" Content="Doorbell" Click="_doorbell_Click" />
         </ToolBar>
         <StackPanel x:Name="_devices" Orientation="Vertical" />
     </StackPanel>

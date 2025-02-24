@@ -30,6 +30,7 @@ internal class IntercomClient(Device device, ServerConfiguration configuration) 
 
         var mqttClientOptionsBuilder = new MqttClientOptionsBuilder()
             .WithTcpServer(configuration.Host, configuration.Port)
+            .WithWillTopic($"intercom/client/{device.DeviceId}/state")
             .WithWillPayload(new JsonObject { ["online"] = false }.ToJsonString())
             .WithWillRetain();
 
@@ -73,6 +74,7 @@ internal class IntercomClient(Device device, ServerConfiguration configuration) 
         await _client.ConnectAsync(mqttClientOptions);
 
         await _client.SubscribeAsync($"intercom/client/{device.DeviceId}/set/+");
+        await _client.SubscribeAsync($"intercom/client/{device.DeviceId}/stream/in");
 
         await _client.PublishStringAsync(
             $"intercom/client/{device.DeviceId}/configuration",

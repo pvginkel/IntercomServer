@@ -15,12 +15,20 @@ internal class StateManager
     private readonly DeviceManager _devices;
     private readonly AlarmManager _alarmManager;
     private readonly IMqttClient _client;
+    private readonly PlaybackManager _playbackManager;
+    private CancellationTokenSource? _ringingPlayback;
 
-    public StateManager(DeviceManager devices, AlarmManager alarmManager, IMqttClient client)
+    public StateManager(
+        DeviceManager devices,
+        AlarmManager alarmManager,
+        IMqttClient client,
+        PlaybackManager playbackManager
+    )
     {
         _devices = devices;
         _alarmManager = alarmManager;
         _client = client;
+        _playbackManager = playbackManager;
 
         _devices.DeviceRemoved += async (_, e) =>
         {
@@ -89,6 +97,14 @@ internal class StateManager
             await item.SetRedLed(_client, Constants.CallingCalledAction);
         }
 
+        _ringingPlayback = new CancellationTokenSource();
+        _playbackManager.StartPlayback(
+            _ringing,
+            Constants.AudioFiles.Ring,
+            new PlaybackConfiguration(true),
+            _ringingPlayback.Token
+        );
+
         _callingAlarm = _alarmManager.SetAlarm(Constants.AttemptCallDuration, CancelCall);
     }
 
@@ -106,8 +122,7 @@ internal class StateManager
             await item.SetRedLed(_client, Constants.LedOff);
         }
 
-        _callingDevice = null;
-        _ringing.Clear();
+        StopRinging();
     }
 
     private async Task AcceptCall(Device device)
@@ -127,8 +142,16 @@ internal class StateManager
         await JoinCall(_callingDevice);
         await JoinCall(device);
 
+        StopRinging();
+    }
+
+    private void StopRinging()
+    {
         _callingDevice = null;
         _ringing.Clear();
+
+        _ringingPlayback!.Cancel();
+        _ringingPlayback = null;
     }
 
     private async Task JoinCall(Device device)
@@ -178,6 +201,8 @@ internal class StateManager
         await CancelCall();
 
         await callingDevice.SetRedLed(_client, Constants.CallRejectedAction);
+
+        _playbackManager.StartPlayback([callingDevice], Constants.AudioFiles.Rejected);
     }
 
     private async Task EndCall()

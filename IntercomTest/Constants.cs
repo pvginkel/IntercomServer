@@ -6,4 +6,5 @@ internal class Constants
 {
     public static readonly AudioFormat AudioFormat = new(AudioChannelLayout.Mono, 16000, 16);
     public static readonly TimeSpan BufferInterval = TimeSpan.FromMilliseconds(100);
+    public static readonly TimeSpan AudioChunkSize = TimeSpan.FromMilliseconds(20);
 }

@@ -104,8 +104,8 @@ internal class Device(string deviceId)
         return new DeviceState(
             true,
             true,
-            RedLed?.State == DeviceLedState.On,
-            GreenLed?.State == DeviceLedState.On,
+            RedLed?.State is DeviceLedState.On or DeviceLedState.Blink,
+            GreenLed?.State is DeviceLedState.On or DeviceLedState.Blink,
             IsPlaying,
             IsRecording,
             SubscribedStreams
@@ -160,6 +160,10 @@ internal class Device(string deviceId)
                 SubscribedStreams = SubscribedStreams.Remove(stream);
                 OnUnsubscribedStream(new DeviceStreamEventArgs(stream));
                 OnStateChanged();
+                break;
+
+            case "stream/in":
+                AppendAudio(e.ApplicationMessage.Topic, e.ApplicationMessage.Payload);
                 break;
         }
     }
