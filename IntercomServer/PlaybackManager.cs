@@ -1,13 +1,12 @@
 ﻿using System.Collections.Immutable;
 using System.Diagnostics;
-using System.Threading;
-using MQTTnet;
+using System.Net;
 using NAudio.Wave;
 using Serilog;
 
 namespace IntercomServer;
 
-internal class PlaybackManager(IMqttClient client)
+internal class PlaybackManager(AudioSender sender)
 {
     private static readonly ILogger Logger = Log.ForContext<PlaybackManager>();
 
@@ -75,10 +74,9 @@ internal class PlaybackManager(IMqttClient client)
 
                 foreach (var device in devices)
                 {
-                    await client.PublishBinaryAsync(
-                        $"intercom/client/{device.DeviceId}/stream/in",
-                        buffer.Take(read),
-                        cancellationToken: cancellationToken
+                    sender.Send(
+                        IPEndPoint.Parse(device.Configuration!.Endpoint!),
+                        buffer.AsSpan(0, read)
                     );
                 }
 

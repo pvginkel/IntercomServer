@@ -9,6 +9,7 @@ public record DeviceLedAction(
     int? Off = null
 );
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum DeviceLedState
 {
     [JsonStringEnumMemberName("on")]

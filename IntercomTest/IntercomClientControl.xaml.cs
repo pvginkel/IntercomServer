@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Net;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -7,6 +8,7 @@ using IntercomServer.Utils;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using Serilog;
+using StoppedEventArgs = NAudio.Wave.StoppedEventArgs;
 
 namespace IntercomTest;
 
@@ -15,10 +17,12 @@ internal partial class IntercomClientControl
     private WasapiCapture? _waveIn;
     private BufferedWaveProvider? _bufferedWaveProvider;
     private WasapiOut? _waveOut;
+    private int _nextPacketIndex;
 
     private static readonly ILogger Logger = Log.ForContext<IntercomClientControl>();
 
     public IntercomClient IntercomClient { get; }
+    public IntercomUDPServer IntercomUDPServer { get; }
     public Device Device { get; }
 
     public event EventHandler? RemoveClicked;
@@ -30,8 +34,19 @@ internal partial class IntercomClientControl
     {
         InitializeComponent();
 
-        Device = new Device(clientConfiguration.DeviceId);
+        IsEnabled = false;
+
+        IntercomUDPServer = new IntercomUDPServer();
+        Device = new Device(
+            clientConfiguration.DeviceId,
+            new IPEndPoint(
+                NetworkUtils.GetNetworkIPAddresses().Single(),
+                IntercomUDPServer.LocalEndPoint.Port
+            )
+        );
         IntercomClient = new IntercomClient(Device, serverConfiguration);
+
+        IntercomUDPServer.Data += IntercomUDPServer_Data;
 
         Device.IsPlayingChanged += Device_IsPlayingChanged;
         Device.IsRecordingChanged += Device_IsRecordingChanged;
@@ -240,7 +255,7 @@ internal partial class IntercomClientControl
         if (device == null)
             return;
 
-        _waveIn = new WasapiCapture(device)
+        _waveIn = new WasapiCapture(device, false, 20)
         {
             WaveFormat = new WaveFormat(
                 Constants.AudioFormat.SampleRate,
@@ -256,16 +271,40 @@ internal partial class IntercomClientControl
         _recordingVolume.Value = device.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
     }
 
-    private async void _waveIn_DataAvailable(object? sender, WaveInEventArgs e)
+    private void _waveIn_DataAvailable(object? sender, WaveInEventArgs e)
     {
         try
         {
-            await IntercomClient.SendAudio(e.Buffer.Take(e.BytesRecorded));
+            const int maxDataSize =
+                1472 /* max safe data size assuming an MTU of 1500 */
+                - 4 /* packet index */
+            ;
+
+            for (int offset = 0; offset < e.BytesRecorded; offset += maxDataSize)
+            {
+                int len = Math.Min(e.BytesRecorded - offset, maxDataSize);
+
+                var packetIndex = BitConverter.GetBytes(_nextPacketIndex++);
+                var buffer = new byte[len + 4];
+
+                Array.Copy(packetIndex, buffer, 4);
+                Array.Copy(e.Buffer, offset, buffer, 4, len);
+
+                foreach (var remoteEndpoint in Device.RemoteEndpoints)
+                {
+                    IntercomUDPServer.Send(remoteEndpoint, buffer);
+                }
+            }
         }
         catch (Exception ex)
         {
             Logger.Error(ex, "Failed to send sample");
         }
+    }
+
+    private void IntercomUDPServer_Data(object? sender, IntercomUDPDataEventArgs e)
+    {
+        Device.AppendAudio(e.RemoteEndpoint.Address, e.Data);
     }
 
     private void _waveIn_RecordingStopped(object? sender, StoppedEventArgs e)
@@ -284,6 +323,8 @@ internal partial class IntercomClientControl
         try
         {
             await IntercomClient.Connect();
+
+            IsEnabled = true;
         }
         catch (Exception ex)
         {

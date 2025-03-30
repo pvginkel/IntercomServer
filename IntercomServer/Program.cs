@@ -31,6 +31,7 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton<MqttClientFactory>();
         services.AddSingleton<AlarmManager>();
         services.AddSingleton<PlaybackManager>();
+        services.AddSingleton<AudioSender>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());
     }
 );

@@ -5,7 +5,8 @@ namespace IntercomServer.Utils;
 public record DeviceConfiguration(
     string? UniqueId,
     DeviceAudioFormats? AudioFormats,
-    DeviceDeviceConfiguration? Device
+    DeviceDeviceConfiguration? Device,
+    string? Endpoint
 );
 
 public record DeviceAudioFormats(DeviceAudioFormat? In, DeviceAudioFormat? Out);

@@ -150,8 +150,11 @@ internal class StateManager
         _callingDevice = null;
         _ringing.Clear();
 
-        _ringingPlayback!.Cancel();
-        _ringingPlayback = null;
+        if (_ringingPlayback != null)
+        {
+            _ringingPlayback.Cancel();
+            _ringingPlayback = null;
+        }
     }
 
     private async Task JoinCall(Device device)
@@ -164,8 +167,8 @@ internal class StateManager
 
         foreach (var item in _inCall)
         {
-            await item.SubscribeStream(_client, $"intercom/client/{device.DeviceId}/stream/out");
-            await device.SubscribeStream(_client, $"intercom/client/{item.DeviceId}/stream/out");
+            await item.AddEndpoint(_client, device.Configuration!.Endpoint!);
+            await device.AddEndpoint(_client, item.Configuration!.Endpoint!);
         }
 
         await device.SetGreenLed(_client, Constants.LedOn);
@@ -183,7 +186,7 @@ internal class StateManager
 
         foreach (var item in _inCall.Where(p => p != device))
         {
-            await item.UnsubscribeStream(_client, $"intercom/client/{device.DeviceId}/stream/out");
+            await item.RemoveEndpoint(_client, device.Configuration!.Endpoint!);
         }
 
         _inCall.Remove(device);
@@ -216,10 +219,7 @@ internal class StateManager
 
             foreach (var other in _inCall.Where(p => item != p))
             {
-                await item.UnsubscribeStream(
-                    _client,
-                    $"intercom/client/{other.DeviceId}/stream/out"
-                );
+                await item.RemoveEndpoint(_client, other.Configuration!.Endpoint!);
             }
         }
 

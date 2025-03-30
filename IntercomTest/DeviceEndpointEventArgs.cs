@@ -1,6 +1,6 @@
 ﻿namespace IntercomTest;
 
-internal class DeviceStreamEventArgs(string stream) : EventArgs
+internal class DeviceEndpointEventArgs(string stream) : EventArgs
 {
     public string Stream { get; } = stream;
 }

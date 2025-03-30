@@ -1,15 +1,18 @@
-﻿using System.Buffers;
+﻿using System.Net;
 using IntercomServer.Utils.Audio;
+using Serilog;
 
 namespace IntercomTest;
 
 internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
 {
+    private static readonly ILogger Logger = Log.ForContext<AudioMixer>();
+
     private readonly byte[] _buffer = new byte[
         (int)(audioFormat.BytesPerSecond * bufferInterval.TotalSeconds * 2)
     ];
     private long _readOffset;
-    private readonly Dictionary<string, long> _writeOffsets = new();
+    private readonly Dictionary<IPAddress, (long Offset, long LastPacket)> _writeOffsets = new();
 
     public bool HasData => _writeOffsets.Count > 0;
 
@@ -21,43 +24,59 @@ internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
         Array.Clear(_buffer);
     }
 
-    public void Append(string topic, ReadOnlySequence<byte> buffer)
+    public void Append(IPAddress address, byte[] buffer)
     {
         // If we don't have a write offset for this topic, we need to
         // start buffering.
 
-        if (!_writeOffsets.TryGetValue(topic, out var writeOffset))
+        if (!_writeOffsets.TryGetValue(address, out var writeOffset))
         {
-            writeOffset = (int)(
-                _readOffset + audioFormat.BytesPerSecond * bufferInterval.TotalSeconds
+            writeOffset = (
+                Offset: (int)(
+                    _readOffset + audioFormat.BytesPerSecond * bufferInterval.TotalSeconds
+                ),
+                LastPacket: long.MinValue
             );
         }
 
-        var available = _buffer.Length - (writeOffset - _readOffset);
-        var copy = (int)Math.Min(available, buffer.Length);
-        var source = buffer.Slice(buffer.Length - copy, copy);
+        var packetIndex = BitConverter.ToInt32(buffer, 0);
+        if (packetIndex < writeOffset.LastPacket)
+        {
+            Logger.Warning(
+                "Dropping package {PacketIndex} of remote {Remote}",
+                packetIndex,
+                address
+            );
+            return;
+        }
 
-        var writeOffsetMod = (int)(writeOffset % _buffer.Length);
+        var data = buffer.AsSpan(4);
+
+        var available = _buffer.Length - (writeOffset.Offset - _readOffset);
+        var copy = (int)Math.Min(available, data.Length);
+        var source = data.Slice(data.Length - copy, copy);
+
+        var writeOffsetMod = (int)(writeOffset.Offset % _buffer.Length);
 
         var chunk1 = Math.Min(_buffer.Length - writeOffsetMod, copy);
         var target1 = _buffer.AsSpan(writeOffsetMod, chunk1);
 
-        MixAudio(source.Slice(0, chunk1), target1);
+        MixAudio(source[..chunk1], target1);
 
         if (chunk1 < copy)
         {
             var chunk2 = copy - chunk1;
             var target2 = _buffer.AsSpan(0, chunk2);
 
-            MixAudio(source.Slice(chunk1), target2);
+            MixAudio(source[chunk1..], target2);
         }
 
-        _writeOffsets[topic] = writeOffset + copy;
+        _writeOffsets[address] = (Offset: writeOffset.Offset + copy, LastPacket: packetIndex);
     }
 
-    private void MixAudio(ReadOnlySequence<byte> source, Span<byte> target)
+    private void MixAudio(Span<byte> source, Span<byte> target)
     {
-        AudioUtils.MixInBuffer(audioFormat, target, source.ToArray().AsSpan());
+        AudioUtils.MixInBuffer(audioFormat, target, source);
     }
 
     public void Take(byte[] buffer)
@@ -94,7 +113,7 @@ internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
 
         foreach (var topic in _writeOffsets.Keys.ToList())
         {
-            if (_writeOffsets[topic] < _readOffset)
+            if (_writeOffsets[topic].Offset < _readOffset)
                 _writeOffsets.Remove(topic);
         }
     }

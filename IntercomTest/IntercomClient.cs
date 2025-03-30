@@ -1,5 +1,4 @@
-﻿using System;
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using IntercomServer.Utils;
@@ -56,9 +55,6 @@ internal class IntercomClient(Device device, ServerConfiguration configuration) 
             }
         };
 
-        device.SubscribedStream += Device_SubscribedStream;
-        device.UnsubscribedStream += Device_UnsubscribedStream;
-
         device.StateChanged += async (_, _) =>
         {
             try
@@ -94,30 +90,6 @@ internal class IntercomClient(Device device, ServerConfiguration configuration) 
         }
     }
 
-    private async void Device_SubscribedStream(object? sender, DeviceStreamEventArgs e)
-    {
-        try
-        {
-            await _client.SubscribeAsync(e.Stream);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "Failed to subscribe to stream");
-        }
-    }
-
-    private async void Device_UnsubscribedStream(object? sender, DeviceStreamEventArgs e)
-    {
-        try
-        {
-            await _client.UnsubscribeAsync(e.Stream);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "Failed to unsubscribe to stream");
-        }
-    }
-
     private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e)
     {
         using (await _syncRoot.EnterAsync())
@@ -137,11 +109,6 @@ internal class IntercomClient(Device device, ServerConfiguration configuration) 
                 _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
             }
         );
-    }
-
-    public async Task SendAudio(IEnumerable<byte> buffer)
-    {
-        await _client.PublishBinaryAsync($"intercom/client/{device.DeviceId}/stream/out", buffer);
     }
 
     public async ValueTask DisposeAsync()

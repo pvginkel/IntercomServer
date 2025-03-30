@@ -57,16 +57,16 @@ internal class Device(string deviceId)
         );
     }
 
-    public async Task SubscribeStream(IMqttClient client, string stream)
+    public async Task AddEndpoint(IMqttClient client, string endpoint)
     {
-        await client.PublishStringAsync($"intercom/client/{DeviceId}/set/subscribe_stream", stream);
+        await client.PublishStringAsync($"intercom/client/{DeviceId}/set/add_endpoint", endpoint);
     }
 
-    public async Task UnsubscribeStream(IMqttClient client, string stream)
+    public async Task RemoveEndpoint(IMqttClient client, string endpoint)
     {
         await client.PublishStringAsync(
-            $"intercom/client/{DeviceId}/set/unsubscribe_stream",
-            stream
+            $"intercom/client/{DeviceId}/set/remove_endpoint",
+            endpoint
         );
     }
 }

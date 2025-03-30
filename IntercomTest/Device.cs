@@ -1,17 +1,19 @@
-﻿using System.Buffers;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
+using System.Net;
 using System.Text.Json;
 using IntercomServer.Utils;
 using MQTTnet;
+using Serilog;
 
 namespace IntercomTest;
 
-internal class Device(string deviceId)
+internal class Device(string deviceId, IPEndPoint localEndPoint)
 {
     private readonly AudioMixer _audioMixer = new(Constants.AudioFormat, Constants.BufferInterval);
 
     private readonly SynchronizationContext _synchronizationContext =
         SynchronizationContext.Current!;
+    private static readonly ILogger Logger = Log.ForContext<Device>();
 
     private bool _isPlaying;
     private bool _isRecording;
@@ -76,15 +78,15 @@ internal class Device(string deviceId)
         }
     }
 
-    public ImmutableArray<string> SubscribedStreams { get; private set; } =
-        ImmutableArray<string>.Empty;
+    public ImmutableArray<IPEndPoint> RemoteEndpoints { get; private set; } =
+        ImmutableArray<IPEndPoint>.Empty;
 
     public event EventHandler? IsPlayingChanged;
     public event EventHandler? IsRecordingChanged;
     public event EventHandler? RedLedChanged;
     public event EventHandler? GreenLedChanged;
-    public event EventHandler<DeviceStreamEventArgs>? SubscribedStream;
-    public event EventHandler<DeviceStreamEventArgs>? UnsubscribedStream;
+    public event EventHandler<DeviceEndpointEventArgs>? AddedEndpoint;
+    public event EventHandler<DeviceEndpointEventArgs>? RemovedEndpoint;
     public event EventHandler? StateChanged;
 
     public DeviceConfiguration GetConfiguration()
@@ -95,7 +97,8 @@ internal class Device(string deviceId)
                 DeviceAudioFormat.FromAudioFormat(Constants.AudioFormat),
                 DeviceAudioFormat.FromAudioFormat(Constants.AudioFormat)
             ),
-            new DeviceDeviceConfiguration("Pieter", "Test Intercom", DeviceId)
+            new DeviceDeviceConfiguration("Pieter", "Test Intercom", DeviceId),
+            $"{localEndPoint.Address}:{localEndPoint.Port}"
         );
     }
 
@@ -107,22 +110,19 @@ internal class Device(string deviceId)
             RedLed?.State is DeviceLedState.On or DeviceLedState.Blink,
             GreenLed?.State is DeviceLedState.On or DeviceLedState.Blink,
             IsPlaying,
-            IsRecording,
-            SubscribedStreams
+            IsRecording
         );
     }
 
     public void HandleMessage(MqttApplicationMessageReceivedEventArgs e)
     {
-        if (SubscribedStreams.Contains(e.ApplicationMessage.Topic))
+        var clientPrefix = $"intercom/client/{DeviceId}/";
+
+        if (!e.ApplicationMessage.Topic.StartsWith(clientPrefix))
         {
-            AppendAudio(e.ApplicationMessage.Topic, e.ApplicationMessage.Payload);
+            Logger.Error("Unexpected topic {Topic}", e.ApplicationMessage.Topic);
             return;
         }
-
-        var clientPrefix = $"intercom/client/{DeviceId}/";
-        if (!e.ApplicationMessage.Topic.StartsWith(clientPrefix))
-            throw new InvalidOperationException("Unexpected topic name");
 
         var topic = e.ApplicationMessage.Topic[clientPrefix.Length..];
 
@@ -146,31 +146,27 @@ internal class Device(string deviceId)
                 )!;
                 break;
 
-            case "set/subscribe_stream":
-                var stream = e.ApplicationMessage.ConvertPayloadToString();
+            case "set/add_endpoint":
+                var endpoint = e.ApplicationMessage.ConvertPayloadToString();
 
-                SubscribedStreams = SubscribedStreams.Add(stream);
-                OnSubscribedStream(new DeviceStreamEventArgs(stream));
+                RemoteEndpoints = RemoteEndpoints.Add(IPEndPoint.Parse(endpoint));
+                OnAddedEndpoint(new DeviceEndpointEventArgs(endpoint));
                 OnStateChanged();
                 break;
 
-            case "set/unsubscribe_stream":
-                stream = e.ApplicationMessage.ConvertPayloadToString();
+            case "set/remove_endpoint":
+                endpoint = e.ApplicationMessage.ConvertPayloadToString();
 
-                SubscribedStreams = SubscribedStreams.Remove(stream);
-                OnUnsubscribedStream(new DeviceStreamEventArgs(stream));
+                RemoteEndpoints = RemoteEndpoints.Remove(IPEndPoint.Parse(endpoint));
+                OnRemovedEndpoint(new DeviceEndpointEventArgs(endpoint));
                 OnStateChanged();
-                break;
-
-            case "stream/in":
-                AppendAudio(e.ApplicationMessage.Topic, e.ApplicationMessage.Payload);
                 break;
         }
     }
 
-    private void AppendAudio(string topic, ReadOnlySequence<byte> sample)
+    public void AppendAudio(IPAddress address, byte[] sample)
     {
-        _audioMixer.Append(topic, sample);
+        _audioMixer.Append(address, sample);
 
         IsPlaying = true;
     }
@@ -202,11 +198,11 @@ internal class Device(string deviceId)
     protected virtual void OnGreenLedChanged() =>
         _synchronizationContext.Post(_ => GreenLedChanged?.Invoke(this, EventArgs.Empty), null);
 
-    protected virtual void OnSubscribedStream(DeviceStreamEventArgs e) =>
-        _synchronizationContext.Post(_ => SubscribedStream?.Invoke(this, e), null);
+    protected virtual void OnAddedEndpoint(DeviceEndpointEventArgs e) =>
+        _synchronizationContext.Post(_ => AddedEndpoint?.Invoke(this, e), null);
 
-    protected virtual void OnUnsubscribedStream(DeviceStreamEventArgs e) =>
-        _synchronizationContext.Post(_ => UnsubscribedStream?.Invoke(this, e), null);
+    protected virtual void OnRemovedEndpoint(DeviceEndpointEventArgs e) =>
+        _synchronizationContext.Post(_ => RemovedEndpoint?.Invoke(this, e), null);
 
     protected virtual void OnStateChanged() =>
         _synchronizationContext.Post(_ => StateChanged?.Invoke(this, EventArgs.Empty), null);

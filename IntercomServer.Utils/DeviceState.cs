@@ -1,6 +1,4 @@
-﻿using System.Collections.Immutable;
-
-namespace IntercomServer.Utils;
+﻿namespace IntercomServer.Utils;
 
 public record DeviceState(
     bool? Online,
@@ -8,6 +6,5 @@ public record DeviceState(
     bool? RedLed,
     bool? GreenLed,
     bool? Playing,
-    bool? Recording,
-    ImmutableArray<string> SubscribedStreams
+    bool? Recording
 );
