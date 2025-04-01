@@ -284,7 +284,9 @@ internal partial class IntercomClientControl
             {
                 int len = Math.Min(e.BytesRecorded - offset, maxDataSize);
 
-                var packetIndex = BitConverter.GetBytes(_nextPacketIndex++);
+                var packetIndex = BitConverter.GetBytes(
+                    IPAddress.HostToNetworkOrder(_nextPacketIndex++)
+                );
                 var buffer = new byte[len + 4];
 
                 Array.Copy(packetIndex, buffer, 4);

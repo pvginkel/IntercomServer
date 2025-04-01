@@ -22,7 +22,9 @@ internal class AudioSender : IDisposable
         {
             int len = Math.Min(data.Length - offset, maxDataSize);
 
-            var packetIndex = BitConverter.GetBytes(_nextPacketIndex++);
+            var packetIndex = BitConverter.GetBytes(
+                IPAddress.HostToNetworkOrder(_nextPacketIndex++)
+            );
             var buffer = new byte[len + 4];
 
             Array.Copy(packetIndex, buffer, 4);

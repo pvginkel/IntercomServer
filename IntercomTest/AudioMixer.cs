@@ -39,7 +39,7 @@ internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
             );
         }
 
-        var packetIndex = BitConverter.ToInt32(buffer, 0);
+        var packetIndex = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(buffer, 0));
         if (packetIndex < writeOffset.LastPacket)
         {
             Logger.Warning(
