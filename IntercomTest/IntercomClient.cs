@@ -111,6 +111,12 @@ internal class IntercomClient(Device device, ServerConfiguration configuration) 
         );
     }
 
+    public async Task RemoveDevice()
+    {
+        await _client.PublishBinaryAsync($"intercom/client/{device.DeviceId}/state");
+        await _client.PublishBinaryAsync($"intercom/client/{device.DeviceId}/configuration");
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _client.DisconnectAsync(_factory.CreateClientDisconnectOptionsBuilder().Build());

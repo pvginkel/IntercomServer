@@ -18,6 +18,8 @@ internal class StateManager
     private readonly PlaybackManager _playbackManager;
     private CancellationTokenSource? _ringingPlayback;
 
+    public bool IsAutoAccept { get; set; }
+
     public StateManager(
         DeviceManager devices,
         AlarmManager alarmManager,
@@ -89,6 +91,18 @@ internal class StateManager
         }
 
         _callingDevice = device;
+
+        if (IsAutoAccept)
+        {
+            foreach (var ringing in _ringing.ToList())
+            {
+                if (_inCall.Count > 0)
+                    await JoinCall(ringing);
+                else
+                    await AcceptCall(ringing);
+            }
+            return;
+        }
 
         await device.SetRedLed(_client, Constants.CallingCallerAction);
 

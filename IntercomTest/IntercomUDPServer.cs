@@ -16,9 +16,9 @@ internal class IntercomUDPServer : IDisposable
 
     public event EventHandler<IntercomUDPDataEventArgs>? Data;
 
-    public IntercomUDPServer()
+    public IntercomUDPServer(int port)
     {
-        _client = new UdpClient(0);
+        _client = new UdpClient(port);
 
         TaskUtils.Run(ReceiveLoop);
     }

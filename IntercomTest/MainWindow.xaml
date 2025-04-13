@@ -1,17 +1,20 @@
 ﻿<local:BaseWindow x:Class="IntercomTest.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:IntercomTest"
-        mc:Ignorable="d"
-        Title="MainWindow" Height="500" Width="700"
+                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                  xmlns:local="clr-namespace:IntercomTest"
+                  ShowInTaskbar="True"
+                  mc:Ignorable="d"
+                  Title="MainWindow" Height="500" Width="700"
                   Closed="BaseWindow_Closed"
-                  Loaded="BaseWindow_Loaded">
+                  Loaded="BaseWindow_Loaded"
+                  Icon="/mainicon.ico">
     <StackPanel Orientation="Vertical">
         <ToolBar>
             <Button x:Name="_addDevice" Content="Add Device" Click="_addDevice_Click" />
             <Button x:Name="_doorbell" Content="Doorbell" Click="_doorbell_Click" />
+            <CheckBox x:Name="_autoAccept" Content="Auto Accept" Checked="_autoAccept_Checked" Unchecked="_autoAccept_Checked"/>
         </ToolBar>
         <StackPanel x:Name="_devices" Orientation="Vertical" />
     </StackPanel>

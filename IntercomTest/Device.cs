@@ -164,7 +164,7 @@ internal class Device(string deviceId, IPEndPoint localEndPoint)
         }
     }
 
-    public void AppendAudio(IPAddress address, byte[] sample)
+    public void AppendAudio(IPEndPoint address, byte[] sample)
     {
         _audioMixer.Append(address, sample);
 

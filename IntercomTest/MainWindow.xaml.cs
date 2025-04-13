@@ -14,6 +14,7 @@ public partial class MainWindow
     private readonly ServerConfiguration _configuration;
     private readonly MqttClientFactory _factory = new();
     private readonly IMqttClient _client;
+    private readonly AudioRecorderServer _audioRecorderServer = new();
 
     public MainWindow()
     {
@@ -31,7 +32,18 @@ public partial class MainWindow
 
         _client = _factory.CreateMqttClient();
 
+        IsEnabled = false;
+
         LoadDevices();
+
+        using (var key = App.BaseKey)
+        {
+            _autoAccept.IsChecked = key.GetValue("Auto Accept") switch
+            {
+                int value => value != 0,
+                _ => false
+            };
+        }
     }
 
     private async void BaseWindow_Loaded(object sender, RoutedEventArgs e)
@@ -51,6 +63,13 @@ public partial class MainWindow
             }
 
             await _client.ConnectAsync(mqttClientOptionsBuilder.Build());
+
+            IsEnabled = true;
+
+            await _client.PublishStringAsync(
+                "intercom/server/set/auto_accept",
+                _autoAccept.IsChecked.GetValueOrDefault() ? "true" : "false"
+            );
         }
         catch (Exception ex)
         {
@@ -142,6 +161,28 @@ public partial class MainWindow
         try
         {
             await _client.PublishStringAsync("intercom/server/set/ring_doorbell", "true");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to ring doorbell");
+        }
+    }
+
+    private async void _autoAccept_Checked(object sender, RoutedEventArgs e)
+    {
+        var autoAccept = _autoAccept.IsChecked.GetValueOrDefault();
+
+        using (var key = App.BaseKey)
+        {
+            key.SetValue("Auto Accept", autoAccept ? 1 : 0);
+        }
+
+        try
+        {
+            await _client.PublishStringAsync(
+                "intercom/server/set/auto_accept",
+                autoAccept ? "true" : "false"
+            );
         }
         catch (Exception ex)
         {

@@ -12,7 +12,7 @@ internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
         (int)(audioFormat.BytesPerSecond * bufferInterval.TotalSeconds * 2)
     ];
     private long _readOffset;
-    private readonly Dictionary<IPAddress, (long Offset, long LastPacket)> _writeOffsets = new();
+    private readonly Dictionary<IPEndPoint, (long Offset, long LastPacket)> _writeOffsets = new();
 
     public bool HasData => _writeOffsets.Count > 0;
 
@@ -24,7 +24,7 @@ internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
         Array.Clear(_buffer);
     }
 
-    public void Append(IPAddress address, byte[] buffer)
+    public void Append(IPEndPoint address, byte[] buffer)
     {
         // If we don't have a write offset for this topic, we need to
         // start buffering.
@@ -43,7 +43,7 @@ internal class AudioMixer(AudioFormat audioFormat, TimeSpan bufferInterval)
         if (packetIndex < writeOffset.LastPacket)
         {
             Logger.Warning(
-                "Dropping package {PacketIndex} of remote {Remote}",
+                "Dropping packet {PacketIndex} of remote {Remote}",
                 packetIndex,
                 address
             );

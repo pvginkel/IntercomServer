@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Net;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -36,7 +37,7 @@ internal partial class IntercomClientControl
 
         IsEnabled = false;
 
-        IntercomUDPServer = new IntercomUDPServer();
+        IntercomUDPServer = new IntercomUDPServer(0);
         Device = new Device(
             clientConfiguration.DeviceId,
             new IPEndPoint(
@@ -306,7 +307,7 @@ internal partial class IntercomClientControl
 
     private void IntercomUDPServer_Data(object? sender, IntercomUDPDataEventArgs e)
     {
-        Device.AppendAudio(e.RemoteEndpoint.Address, e.Data);
+        Device.AppendAudio(e.RemoteEndpoint, e.Data);
     }
 
     private void _waveIn_RecordingStopped(object? sender, StoppedEventArgs e)
@@ -343,8 +344,10 @@ internal partial class IntercomClientControl
         );
     }
 
-    private void _remove_Click(object sender, RoutedEventArgs e)
+    private async void _remove_Click(object sender, RoutedEventArgs e)
     {
+        await IntercomClient.RemoveDevice();
+
         OnRemoveClicked();
     }
 

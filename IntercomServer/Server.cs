@@ -55,7 +55,7 @@ internal class Server(
 
         await client.ConnectAsync(mqttClientOptions);
 
-        await client.SubscribeAsync("intercom/server/set/ring_doorbell");
+        await client.SubscribeAsync("intercom/server/set/+");
         await client.SubscribeAsync("intercom/client/+/state");
         await client.SubscribeAsync("intercom/client/+/configuration");
         await client.SubscribeAsync("intercom/client/+/set/action");
@@ -116,6 +116,10 @@ internal class Server(
                         Constants.AudioFiles.Doorbell
                     );
                 }
+                break;
+
+            case "set/auto_accept":
+                state.IsAutoAccept = message.ConvertPayloadToString() == "true";
                 break;
 
             default:
