@@ -6,5 +6,6 @@ public record DeviceState(
     bool? RedLed,
     bool? GreenLed,
     bool? Playing,
-    bool? Recording
+    bool? Recording,
+    double? Volume
 );

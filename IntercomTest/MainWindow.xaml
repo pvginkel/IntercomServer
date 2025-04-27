@@ -10,12 +10,21 @@
                   Closed="BaseWindow_Closed"
                   Loaded="BaseWindow_Loaded"
                   Icon="/mainicon.ico">
-    <StackPanel Orientation="Vertical">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
         <ToolBar>
             <Button x:Name="_addDevice" Content="Add Device" Click="_addDevice_Click" />
             <Button x:Name="_doorbell" Content="Doorbell" Click="_doorbell_Click" />
             <CheckBox x:Name="_autoAccept" Content="Auto Accept" Checked="_autoAccept_Checked" Unchecked="_autoAccept_Checked"/>
         </ToolBar>
-        <StackPanel x:Name="_devices" Orientation="Vertical" />
-    </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Grid.Row="1">
+            <StackPanel Orientation="Vertical">
+                <StackPanel x:Name="_testDevices" Orientation="Vertical" />
+                <StackPanel x:Name="_devices" Orientation="Vertical" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
 </local:BaseWindow>

@@ -1,7 +1,9 @@
 ﻿using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
+using IntercomServer.Utils;
 using MQTTnet;
 using Serilog;
 
@@ -15,6 +17,8 @@ public partial class MainWindow
     private readonly MqttClientFactory _factory = new();
     private readonly IMqttClient _client;
     private readonly AudioRecorderServer _audioRecorderServer = new();
+    private readonly Dictionary<string, DeviceState> _deviceStates =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public MainWindow()
     {
@@ -62,6 +66,8 @@ public partial class MainWindow
                 );
             }
 
+            _client.ApplicationMessageReceivedAsync += _client_ApplicationMessageReceivedAsync;
+
             await _client.ConnectAsync(mqttClientOptionsBuilder.Build());
 
             IsEnabled = true;
@@ -70,11 +76,146 @@ public partial class MainWindow
                 "intercom/server/set/auto_accept",
                 _autoAccept.IsChecked.GetValueOrDefault() ? "true" : "false"
             );
+
+            await _client.SubscribeAsync("intercom/client/+/configuration");
+            await _client.SubscribeAsync("intercom/client/+/state");
         }
         catch (Exception ex)
         {
             Logger.Error(ex, "Failed to connect");
         }
+    }
+
+    private Task _client_ApplicationMessageReceivedAsync(
+        MqttApplicationMessageReceivedEventArgs arg
+    )
+    {
+        var match = Regex.Match(
+            arg.ApplicationMessage.Topic,
+            "^intercom/client/([^/]+)/(configuration|state)$"
+        );
+        if (!match.Success)
+        {
+            Logger.Warning("Invalid topic {Topic}", arg.ApplicationMessage.Topic);
+
+            return Task.CompletedTask;
+        }
+
+        var deviceId = match.Groups[1].Value;
+        var action = match.Groups[2].Value;
+        var payload = arg.ApplicationMessage.ConvertPayloadToString();
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            switch (action)
+            {
+                case "configuration":
+                    if (payload == null)
+                    {
+                        RemoveRealDevice(deviceId);
+                    }
+                    else
+                    {
+                        var configuration = JsonSerializer.Deserialize<DeviceConfiguration>(
+                            payload,
+                            IntercomClient.JsonSerializerOptions
+                        )!;
+
+                        AddOrUpdateRealDevice(deviceId, configuration);
+                    }
+                    break;
+
+                case "state":
+                    if (payload != null)
+                    {
+                        _deviceStates[deviceId] = JsonSerializer.Deserialize<DeviceState>(
+                            payload,
+                            IntercomClient.JsonSerializerOptions
+                        )!;
+                        UpdateRealDeviceState(deviceId);
+                    }
+                    break;
+            }
+        });
+
+        return Task.CompletedTask;
+    }
+
+    private RealDeviceControl? FindDevice(string deviceId)
+    {
+        return _devices
+            .Children.OfType<RealDeviceControl>()
+            .SingleOrDefault(p =>
+                string.Equals(p.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
+            );
+    }
+
+    private void AddOrUpdateRealDevice(string deviceId, DeviceConfiguration configuration)
+    {
+        if (
+            _testDevices
+                .Children.OfType<IntercomClientControl>()
+                .Any(p =>
+                    string.Equals(p.Device.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
+                )
+        )
+            return;
+
+        var device = FindDevice(deviceId);
+        if (device == null)
+        {
+            device = new RealDeviceControl(deviceId) { Margin = new Thickness(3) };
+
+            device.RemoveClicked += async (_, _) =>
+            {
+                try
+                {
+                    await _client.PublishBinaryAsync(
+                        $"intercom/client/{deviceId}/state",
+                        retain: true
+                    );
+                    await _client.PublishBinaryAsync(
+                        $"intercom/client/{deviceId}/configuration",
+                        retain: true
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Failed to remove device");
+                }
+            };
+
+            device.VolumeChanged += async (s, e) =>
+            {
+                try
+                {
+                    await _client.PublishStringAsync(
+                        $"intercom/client/{deviceId}/set/volume",
+                        JsonSerializer.Serialize(e, IntercomClient.JsonSerializerOptions)
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Failed to publish volume");
+                }
+            };
+
+            _devices.Children.Add(device);
+        }
+
+        device.SetConfiguration(configuration);
+    }
+
+    private void RemoveRealDevice(string deviceId)
+    {
+        var device = FindDevice(deviceId);
+        if (device != null)
+            _devices.Children.Remove(device);
+    }
+
+    private void UpdateRealDeviceState(string deviceId)
+    {
+        FindDevice(deviceId)?.SetState(_deviceStates[deviceId]);
     }
 
     private void LoadDevices()
@@ -111,12 +252,12 @@ public partial class MainWindow
                 Logger.Error(ex, "Failed to close client");
             }
 
-            _devices.Children.Remove(intercomClientControl);
+            _testDevices.Children.Remove(intercomClientControl);
 
             SaveDeviceConfiguration();
         };
 
-        _devices.Children.Add(intercomClientControl);
+        _testDevices.Children.Add(intercomClientControl);
     }
 
     private void _addDevice_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -143,7 +284,7 @@ public partial class MainWindow
     {
         using var stream = File.Create(Path.Combine(App.BasePath, "Devices.json"));
 
-        var intercomClientConfigurations = _devices
+        var intercomClientConfigurations = _testDevices
             .Children.Cast<IntercomClientControl>()
             .Select(p => p.GetConfiguration())
             .ToList();
