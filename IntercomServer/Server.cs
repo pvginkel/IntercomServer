@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.ComponentModel;
+using System.Text.RegularExpressions;
 using IntercomServer.Utils;
 using MQTTnet;
 using MQTTnet.Internal;
@@ -53,7 +54,13 @@ internal class Server(
             }
         };
 
-        await client.ConnectAsync(mqttClientOptions);
+        var result = await client.ConnectAsync(mqttClientOptions);
+        if (result.ResultCode != MqttClientConnectResultCode.Success)
+        {
+            throw new InvalidOperationException(
+                $"Failed to connect to the MQTT server with error '{result.ResultCode}'"
+            );
+        }
 
         await client.SubscribeAsync("intercom/server/set/+");
         await client.SubscribeAsync("intercom/client/+/state");
