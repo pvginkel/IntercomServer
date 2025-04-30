@@ -1,12 +1,17 @@
 {
   "profiles": {
-    "IntercomServer": {
+    "Production": {
       "commandName": "Project",
       "environmentVariables": {
-        "MQTT_HOST": "localhost",
-        "MQTT_PORT": "",
-        "MQTT_USERNAME": "",
-        "MQTT_PASSWORD": ""
+        "MQTT_HOST": "192.168.178.5",
+        "MQTT_USERNAME": "mqtt",
+        "MQTT_PASSWORD": "oGhdlk3ZaYdwh4U5GXYW8FRQ7ClcorKiL9sa9vX0FKjiy3vDbZ8sIJnAilGZaQY"
+      }
+    },
+    "Develop": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "MQTT_HOST": "localhost"
       }
     }
   }

@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Net;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 using Serilog;
 
 namespace IntercomServer;
@@ -115,17 +116,34 @@ internal class PlaybackManager(AudioSender sender)
                 Constants.AudioFormat.ChannelCount
             );
 
-            using (var resampler = new MediaFoundationResampler(reader, targetFormat))
+            var sampleProvider = reader.ToSampleProvider();
+
+            if (sampleProvider.WaveFormat.SampleRate != targetFormat.SampleRate)
             {
-                resampler.ResamplerQuality = 60;
+                sampleProvider = new WdlResamplingSampleProvider(
+                    sampleProvider,
+                    targetFormat.SampleRate
+                );
+            }
 
-                var buffer = new byte[resampler.WaveFormat.AverageBytesPerSecond];
-                int read;
-
-                while ((read = resampler.Read(buffer, 0, buffer.Length)) > 0)
+            if (sampleProvider.WaveFormat.Channels != targetFormat.Channels)
+            {
+                sampleProvider = targetFormat.Channels switch
                 {
-                    result.Write(buffer, 0, read);
-                }
+                    1 => new StereoToMonoSampleProvider(sampleProvider),
+                    2 => new MonoToStereoSampleProvider(sampleProvider),
+                    _ => sampleProvider
+                };
+            }
+
+            var waveProvider = new SampleToWaveProvider16(sampleProvider);
+
+            var buffer = new byte[waveProvider.WaveFormat.AverageBytesPerSecond];
+
+            int read;
+            while ((read = waveProvider.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                result.Write(buffer, 0, read);
             }
         }
 
