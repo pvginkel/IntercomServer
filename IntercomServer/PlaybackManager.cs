@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using NLayer.NAudioSupport;
 using Serilog;
 
 namespace IntercomServer;
@@ -108,7 +109,11 @@ internal class PlaybackManager(AudioSender sender)
 
         var result = new MemoryStream();
 
-        using (var reader = new Mp3FileReader(stream))
+        var builder = new Mp3FileReaderBase.FrameDecompressorBuilder(p => new Mp3FrameDecompressor(
+            p
+        ));
+
+        using (var reader = new Mp3FileReaderBase(stream, builder))
         {
             var targetFormat = new WaveFormat(
                 Constants.AudioFormat.SampleRate,
