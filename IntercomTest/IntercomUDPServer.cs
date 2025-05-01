@@ -7,7 +7,6 @@ internal class IntercomUDPServer : IDisposable
 {
     private readonly ManualResetEventSlim _event = new();
     private readonly UdpClient _client;
-    private readonly CancellationTokenSource _cts = new();
     private readonly Queue<(IPEndPoint EndPoint, byte[] Data)> _sendQueue = new();
     private readonly Lock _syncRoot = new();
     private bool _sendLoopRunning;
@@ -27,16 +26,12 @@ internal class IntercomUDPServer : IDisposable
     {
         try
         {
-            while (!_cts.Token.IsCancellationRequested)
+            while (true)
             {
-                var result = await _client.ReceiveAsync(_cts.Token);
+                var result = await _client.ReceiveAsync();
 
                 OnData(new IntercomUDPDataEventArgs(result.RemoteEndPoint, result.Buffer));
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Ignore.
         }
         finally
         {
@@ -61,27 +56,20 @@ internal class IntercomUDPServer : IDisposable
 
     private async Task SendLoop()
     {
-        try
+        while (true)
         {
-            while (true)
+            (IPEndPoint EndPoint, byte[] Data) data;
+
+            lock (_syncRoot)
             {
-                (IPEndPoint EndPoint, byte[] Data) data;
-
-                lock (_syncRoot)
+                if (!_sendQueue.TryDequeue(out data!))
                 {
-                    if (!_sendQueue.TryDequeue(out data!))
-                    {
-                        _sendLoopRunning = false;
-                        return;
-                    }
+                    _sendLoopRunning = false;
+                    return;
                 }
-
-                await _client.SendAsync(data.Data, data.EndPoint, _cts.Token);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Ignore.
+
+            await _client.SendAsync(data.Data, data.EndPoint);
         }
     }
 
@@ -89,11 +77,6 @@ internal class IntercomUDPServer : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
-
-        _event.Wait();
-
-        _cts.Dispose();
-        _event.Dispose();
+        _client.Dispose();
     }
 }

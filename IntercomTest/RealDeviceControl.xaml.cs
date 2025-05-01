@@ -6,6 +6,7 @@ namespace IntercomTest;
 
 internal partial class RealDeviceControl
 {
+    public DeviceConfiguration? Configuration { get; private set; }
     public string DeviceId { get; }
 
     public event EventHandler? RemoveClicked;
@@ -35,6 +36,8 @@ internal partial class RealDeviceControl
 
     public void SetConfiguration(DeviceConfiguration configuration)
     {
+        Configuration = configuration;
+
         _name.Content = configuration.Device?.Name;
     }
 

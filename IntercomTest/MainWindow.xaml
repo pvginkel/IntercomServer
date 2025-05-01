@@ -19,6 +19,7 @@
             <Button x:Name="_addDevice" Content="Add Device" Click="_addDevice_Click" />
             <Button x:Name="_doorbell" Content="Doorbell" Click="_doorbell_Click" />
             <CheckBox x:Name="_autoAccept" Content="Auto Accept" Checked="_autoAccept_Checked" Unchecked="_autoAccept_Checked"/>
+            <Button x:Name="_aecTest" Content="AEC Test" Click="_aecTest_Click" />
         </ToolBar>
         <ScrollViewer VerticalScrollBarVisibility="Auto" Grid.Row="1">
             <StackPanel Orientation="Vertical">

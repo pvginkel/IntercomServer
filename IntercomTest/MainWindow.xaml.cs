@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using IntercomServer.Utils;
 using MQTTnet;
 using Serilog;
@@ -79,6 +80,12 @@ public partial class MainWindow
 
             await _client.SubscribeAsync("intercom/client/+/configuration");
             await _client.SubscribeAsync("intercom/client/+/state");
+
+            await Task.Delay(TimeSpan.FromSeconds(0.1));
+
+#if DEBUG
+            _aecTest.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+#endif
         }
         catch (Exception ex)
         {
@@ -344,5 +351,17 @@ public partial class MainWindow
         {
             Logger.Error(ex, "Failed to ring doorbell");
         }
+    }
+
+    private void _aecTest_Click(object sender, RoutedEventArgs e)
+    {
+        var devices = _devices
+            .Children.OfType<RealDeviceControl>()
+            .Select(p => new DeviceRef(p.DeviceId, p.Configuration!))
+            .ToList();
+
+        var window = new AECTestWindow(_client, devices) { Owner = this, Icon = Icon };
+
+        window.ShowDialog();
     }
 }
