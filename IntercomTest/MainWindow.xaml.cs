@@ -200,6 +200,21 @@ public partial class MainWindow
                 }
             };
 
+            device.IdentifyClicked += async (s, e) =>
+            {
+                try
+                {
+                    await _client.PublishStringAsync(
+                        $"intercom/client/{deviceId}/set/identify",
+                        "true"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Failed to request identification");
+                }
+            };
+
             _devices.Children.Add(device);
         }
 

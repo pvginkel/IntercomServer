@@ -1,7 +1,6 @@
 ﻿using System.Windows;
 using System.Windows.Media;
 using IntercomServer.Utils;
-using static System.Windows.Forms.AxHost;
 
 namespace IntercomTest;
 
@@ -10,8 +9,8 @@ internal partial class RealDeviceControl
     public string DeviceId { get; }
 
     public event EventHandler? RemoveClicked;
-
     public event EventHandler<double>? VolumeChanged;
+    public event EventHandler? IdentifyClicked;
 
     public RealDeviceControl(string deviceId)
     {
@@ -55,7 +54,11 @@ internal partial class RealDeviceControl
 
     private void _remove_Click(object sender, RoutedEventArgs e) => OnRemoveClicked();
 
+    private void _identify_Click(object sender, RoutedEventArgs e) => OnIdentifyClicked();
+
     protected virtual void OnRemoveClicked() => RemoveClicked?.Invoke(this, EventArgs.Empty);
 
     protected virtual void OnVolumeChanged(double e) => VolumeChanged?.Invoke(this, e);
+
+    protected virtual void OnIdentifyClicked() => IdentifyClicked?.Invoke(this, EventArgs.Empty);
 }

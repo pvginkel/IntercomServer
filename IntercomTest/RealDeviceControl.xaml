@@ -43,7 +43,10 @@
                 <CheckBox x:Name="_recording" IsEnabled="False" Grid.Row="4" Grid.Column="1" Content="Recording" Margin="3" Grid.ColumnSpan="2" />
                 <CheckBox x:Name="_playing" IsEnabled="False" Grid.Row="5" Grid.Column="1" Content="Playing" Margin="3" Grid.ColumnSpan="2" />
             </Grid>
-            <Button x:Name="_remove" Content="Remove" Grid.RowSpan="99" Grid.ColumnSpan="99" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3" Click="_remove_Click" Padding="5,3" />
+            <StackPanel Orientation="Horizontal" Grid.RowSpan="99" Grid.ColumnSpan="99" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                <Button x:Name="_identify" Content="Identify" Margin="3" Click="_identify_Click" Padding="5,3" />
+                <Button x:Name="_remove" Content="Remove" Margin="3" Click="_remove_Click" Padding="5,3" />
+            </StackPanel>
         </Grid>
     </GroupBox>
 </UserControl>
