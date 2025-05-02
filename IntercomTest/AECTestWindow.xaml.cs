@@ -1,5 +1,4 @@
-﻿using System.Collections.Immutable;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Windows;
@@ -8,11 +7,9 @@ using System.Windows.Forms;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using IntercomServer.Utils;
 using MQTTnet;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
-using Serilog.Core;
 
 namespace IntercomTest;
 
@@ -28,6 +25,8 @@ internal partial class AECTestWindow
     public AECTestWindow(IMqttClient client, List<DeviceRef> devices)
     {
         _client = client;
+
+        _client.ApplicationMessageReceivedAsync += _client_ApplicationMessageReceivedAsync;
 
         InitializeComponent();
 
@@ -57,6 +56,26 @@ internal partial class AECTestWindow
         }
 
         Dispatcher.BeginInvoke(RecreateBitmap, DispatcherPriority.Render);
+    }
+
+    private async Task _client_ApplicationMessageReceivedAsync(
+        MqttApplicationMessageReceivedEventArgs arg
+    )
+    {
+        if (_listeningDevice == null)
+            return;
+
+        var prefix = $"intercom/client/{_listeningDevice.DeviceId}/";
+        if (!arg.ApplicationMessage.Topic.StartsWith(prefix))
+            return;
+
+        switch (arg.ApplicationMessage.Topic[prefix.Length..])
+        {
+            case "configuration":
+                // Assume a configuration message means a restart of the device.
+                await ConfigureDevice(_listeningDevice.DeviceId, true);
+                break;
+        }
     }
 
     private void _udpServer_Data(object? sender, IntercomUDPDataEventArgs e)
@@ -161,6 +180,8 @@ internal partial class AECTestWindow
             await ConfigureDevice(_listeningDevice.DeviceId, false);
 
         _udpServer.Dispose();
+
+        _client.ApplicationMessageReceivedAsync -= _client_ApplicationMessageReceivedAsync;
     }
 
     private async void _device_SelectionChanged(object sender, SelectionChangedEventArgs e)

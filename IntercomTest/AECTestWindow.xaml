@@ -22,7 +22,7 @@
         <Label>Device</Label>
         <ComboBox x:Name="_device" Grid.Column="1" Grid.ColumnSpan="2" Margin="3" SelectionChanged="_device_SelectionChanged"/>
         <Label Grid.Row="1">Audio file:</Label>
-        <TextBox x:Name="_fileName" Grid.Column="1" Grid.Row="1" Margin="3" IsReadOnly="True"/>
+        <TextBox x:Name="_fileName" Grid.Column="1" Grid.Row="1" Margin="3" IsReadOnly="True" VerticalAlignment="Center"/>
         <StackPanel Orientation="Horizontal" Grid.Column="2" Grid.Row="1">
             <Button x:Name="_selectFile" Content="Select" Margin="3" Padding="5,3" Click="_selectFile_Click"/>
             <Button x:Name="_playFile" Content="Play" Margin="3" Padding="5,3" Click="_playFile_Click"/>
