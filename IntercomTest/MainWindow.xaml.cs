@@ -81,9 +81,9 @@ public partial class MainWindow
             await _client.SubscribeAsync("intercom/client/+/configuration");
             await _client.SubscribeAsync("intercom/client/+/state");
 
+#if false
             await Task.Delay(TimeSpan.FromSeconds(0.1));
 
-#if DEBUG
             _aecTest.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
 #endif
         }

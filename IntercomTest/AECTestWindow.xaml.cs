@@ -7,9 +7,11 @@ using System.Windows.Forms;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using IntercomTest.SoundRendering;
 using MQTTnet;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using Serilog;
 
 namespace IntercomTest;
 
@@ -18,9 +20,10 @@ internal partial class AECTestWindow
     private readonly IMqttClient _client;
     private readonly IntercomUDPServer _udpServer = new(5140);
     private WriteableBitmap? _bitmap;
+    private ISoundRenderer? _renderer;
     private DeviceRef? _listeningDevice;
     private readonly string _udpServerEndpoint;
-    private readonly Queue<float> _samples = new();
+    private WaveFileWriter? _writer;
 
     public AECTestWindow(IMqttClient client, List<DeviceRef> devices)
     {
@@ -39,6 +42,7 @@ internal partial class AECTestWindow
 
         var lastDevice = key.GetValue("AEC Device") as string;
         _fileName.Text = key.GetValue("AEC File Name") as string ?? "";
+        _spectrogram.IsChecked = (key.GetValue("AEC Spectrogram") as int?).GetValueOrDefault() != 0;
 
         _device.Items.Add("");
 
@@ -80,81 +84,15 @@ internal partial class AECTestWindow
 
     private void _udpServer_Data(object? sender, IntercomUDPDataEventArgs e)
     {
-        for (int offset = 0; offset < e.Data.Length; offset += 2)
-        {
-            _samples.Enqueue(BitConverter.ToInt16(e.Data, offset) / (float)short.MaxValue);
-        }
+        _writer?.Write(e.Data.AsSpan(4));
 
-        var samples = new List<float>();
-
-        const int BlockSize = 200;
-
-        while (_samples.Count >= BlockSize)
-        {
-            float sum = 0;
-
-            for (int i = 0; i < BlockSize; i++)
-            {
-                sum += Math.Abs(_samples.Dequeue());
-            }
-
-            var amp = sum / BlockSize;
-
-            samples.Add(amp);
-        }
+        if (_renderer == null)
+            return;
 
         Dispatcher.Invoke(() =>
         {
-            foreach (var sample in samples)
-            {
-                DrawSample(sample);
-            }
+            _renderer.AddData(e.Data);
         });
-    }
-
-    private void DrawSample(float amplitude)
-    {
-        if (_bitmap == null)
-            return;
-
-        _bitmap.Lock();
-
-        var height = _bitmap.PixelHeight;
-        var width = _bitmap.PixelWidth;
-
-        // 1) Scroll left by 1 px: copy pixels [1..W-1] → [0..W-2]
-        int stride = _bitmap.BackBufferStride;
-        unsafe
-        {
-            var pBack = (byte*)_bitmap.BackBuffer;
-            for (int y = 0; y < height; y++)
-            {
-                Buffer.MemoryCopy(
-                    pBack + (y * stride) + 4, // start at x=1
-                    pBack + (y * stride), // dest at x=0
-                    stride - 4, // dest buffer size
-                    stride - 4
-                ); // copy this many bytes
-            }
-        }
-
-        // 2) Draw new vertical line at x = WIDTH-1
-        int midY = height / 2;
-        int lineHeight = (int)(amplitude * midY);
-        unsafe
-        {
-            var p = (int*)_bitmap.BackBuffer;
-            for (int y = 0; y < height; y++)
-            {
-                int color = 0;
-                if (y >= midY - lineHeight && y <= midY + lineHeight)
-                    color = 0x00FF0000; // ARGB red
-                p[y * width + (width - 1)] = color;
-            }
-        }
-
-        _bitmap.AddDirtyRect(new Int32Rect(0, 0, width, height));
-        _bitmap.Unlock();
     }
 
     private void RecreateBitmap()
@@ -172,6 +110,10 @@ internal partial class AECTestWindow
         );
 
         _waveImage.Source = _bitmap;
+
+        _renderer = _spectrogram.IsChecked.GetValueOrDefault()
+            ? new SpectrogramRenderer(_bitmap)
+            : new WaveRenderer(_bitmap);
     }
 
     private async void BaseWindow_Closed(object sender, EventArgs e)
@@ -281,33 +223,49 @@ internal partial class AECTestWindow
 
     private async Task RunPlayback(Stream stream)
     {
-        var stopwatch = Stopwatch.StartNew();
-        var sent = TimeSpan.Zero;
-        var buffer = new byte[
-            (int)(Constants.AudioFormat.BytesPerSecond * Constants.AudioChunkSize.TotalSeconds)
-        ];
+        string fileName = Path.GetFullPath("AEC Output.wav");
 
-        stream.Position = 0;
-        int index = 0;
+        Log.Information("Start dumping audio data to {FileName}", fileName);
 
-        while (true)
+        _writer = new WaveFileWriter(fileName, new WaveFormat(16000, 16, 1));
+
+        try
         {
-            var read = stream.Read(buffer, 0, buffer.Length);
+            var stopwatch = Stopwatch.StartNew();
+            var sent = TimeSpan.Zero;
+            var buffer = new byte[
+                (int)(Constants.AudioFormat.BytesPerSecond * Constants.AudioChunkSize.TotalSeconds)
+            ];
 
-            if (read == 0)
-                return;
+            stream.Position = 0;
+            int index = 0;
 
-            Send(
-                ref index,
-                IPEndPoint.Parse(_listeningDevice!.Configuration!.Endpoint!),
-                buffer.AsSpan(0, read)
-            );
+            while (true)
+            {
+                var read = stream.Read(buffer, 0, buffer.Length);
 
-            sent += TimeSpan.FromSeconds((double)read / Constants.AudioFormat.BytesPerSecond);
+                if (read == 0)
+                    return;
 
-            var delay = sent - stopwatch.Elapsed;
-            if (delay.Ticks > 0)
-                await Task.Delay(delay);
+                Send(
+                    ref index,
+                    IPEndPoint.Parse(_listeningDevice!.Configuration!.Endpoint!),
+                    buffer.AsSpan(0, read)
+                );
+
+                sent += TimeSpan.FromSeconds((double)read / Constants.AudioFormat.BytesPerSecond);
+
+                var delay = sent - stopwatch.Elapsed;
+                if (delay.Ticks > 0)
+                    await Task.Delay(delay);
+            }
+        }
+        finally
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+
+            _writer?.Dispose();
+            _writer = null;
         }
     }
 
@@ -330,5 +288,14 @@ internal partial class AECTestWindow
 
             _udpServer.Send(endPoint, buffer);
         }
+    }
+
+    private void _spectrogram_Checked(object sender, RoutedEventArgs e)
+    {
+        using var key = App.BaseKey;
+
+        key.SetValue("AEC Spectrogram", _spectrogram.IsChecked.GetValueOrDefault() ? 1 : 0);
+
+        RecreateBitmap();
     }
 }

@@ -10,6 +10,7 @@
                   Title="AEC Test" Height="450" Width="800">
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -19,15 +20,19 @@
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <Label>Device</Label>
-        <ComboBox x:Name="_device" Grid.Column="1" Grid.ColumnSpan="2" Margin="3" SelectionChanged="_device_SelectionChanged"/>
-        <Label Grid.Row="1">Audio file:</Label>
-        <TextBox x:Name="_fileName" Grid.Column="1" Grid.Row="1" Margin="3" IsReadOnly="True" VerticalAlignment="Center"/>
-        <StackPanel Orientation="Horizontal" Grid.Column="2" Grid.Row="1">
+        <ToolBar Grid.ColumnSpan="99">
+            <Button x:Name="_playFile" Content="Play" Click="_playFile_Click"/>
+            <Separator/>
+            <ToggleButton x:Name="_spectrogram" Content="Spectrogram" Checked="_spectrogram_Checked" Unchecked="_spectrogram_Checked" />
+        </ToolBar>
+        <Label Grid.Row="1">Device</Label>
+        <ComboBox x:Name="_device" Grid.Column="1" Grid.ColumnSpan="2" Margin="3" SelectionChanged="_device_SelectionChanged" Grid.Row="1"/>
+        <Label Grid.Row="2">Audio file:</Label>
+        <TextBox x:Name="_fileName" Grid.Column="1" Grid.Row="2" Margin="3" IsReadOnly="True" VerticalAlignment="Center"/>
+        <StackPanel Orientation="Horizontal" Grid.Column="2" Grid.Row="2">
             <Button x:Name="_selectFile" Content="Select" Margin="3" Padding="5,3" Click="_selectFile_Click"/>
-            <Button x:Name="_playFile" Content="Play" Margin="3" Padding="5,3" Click="_playFile_Click"/>
         </StackPanel>
-        <Border x:Name="_waveImageContainer" Grid.Row="2" Grid.ColumnSpan="3" Margin="3" SizeChanged="_waveImageContainer_SizeChanged">
+        <Border x:Name="_waveImageContainer" Grid.Row="3" Grid.ColumnSpan="3" Margin="3" SizeChanged="_waveImageContainer_SizeChanged">
             <Image x:Name="_waveImage"/>
         </Border>
     </Grid>
