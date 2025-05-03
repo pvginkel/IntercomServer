@@ -20,6 +20,7 @@ public partial class MainWindow
     private readonly AudioRecorderServer _audioRecorderServer = new();
     private readonly Dictionary<string, DeviceState> _deviceStates =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Task<string> _latestFirmwareVersion;
 
     public MainWindow()
     {
@@ -38,6 +39,8 @@ public partial class MainWindow
         _client = _factory.CreateMqttClient();
 
         IsEnabled = false;
+
+        _latestFirmwareVersion = LoadLatestFirmwareVersion();
 
         LoadDevices();
     }
@@ -171,7 +174,13 @@ public partial class MainWindow
         var device = FindDevice(deviceId);
         if (device == null)
         {
-            device = new RealDeviceControl(deviceId) { Margin = new Thickness(3) };
+            device = new RealDeviceControl(
+                deviceId,
+                _latestFirmwareVersion.GetAwaiter().GetResult()
+            )
+            {
+                Margin = new Thickness(3)
+            };
 
             device.RemoveClicked += async (_, _) =>
             {
@@ -219,6 +228,21 @@ public partial class MainWindow
                 catch (Exception ex)
                 {
                     Logger.Error(ex, "Failed to request identification");
+                }
+            };
+
+            device.RestartClicked += async (s, e) =>
+            {
+                try
+                {
+                    await _client.PublishStringAsync(
+                        $"intercom/client/{deviceId}/set/restart",
+                        "true"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Failed to request restart");
                 }
             };
 
@@ -363,5 +387,22 @@ public partial class MainWindow
         var window = new AECTestWindow(_client, devices) { Owner = this, Icon = Icon };
 
         window.ShowDialog();
+    }
+
+    private async Task<string> LoadLatestFirmwareVersion()
+    {
+        await using var stream = await App.HttpClient.GetStreamAsync(
+            "http://iotsupport.home/assets/intercom-ota.bin"
+        );
+
+        const int headerOffset = 0x20;
+        const int versionOffset = 16;
+
+        await stream.ReadExactlyAsync(new byte[headerOffset + versionOffset]);
+
+        byte[] version = new byte[32];
+        await stream.ReadExactlyAsync(version);
+
+        return Encoding.ASCII.GetString(version).TrimEnd('\0', ' ', '\r', '\n');
     }
 }

@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Net.Http;
 using System.Windows;
 using Microsoft.Win32;
 using Serilog;
@@ -14,6 +15,8 @@ public partial class App
 
     public static RegistryKey BaseKey =>
         Registry.CurrentUser.CreateSubKey("Webathome\\Intercom Test");
+
+    public static readonly HttpClient HttpClient = new();
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {

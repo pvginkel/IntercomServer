@@ -23,28 +23,33 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <Label Content="Name:" />
                 <Label Content="Device name" x:Name="_name" Grid.Column="1" Grid.ColumnSpan="2"/>
 
-                <Label Content="Playback volume:" Grid.Row="1" />
+                <Label Content="Firmware version:" Grid.Row="1" />
+                <Label Content="Firmware version" Grid.Row="1" x:Name="_firmwareVersion" Grid.Column="1" Grid.ColumnSpan="2"/>
+
+                <Label Content="Playback volume:" Grid.Row="2" />
                 <local:CustomSlider x:Name="_playbackVolume" Grid.Column="1" Margin="3" VerticalAlignment="Center"
                         Minimum="-20" Maximum="-6" LargeChange="1" SmallChange="0.2"
-                        ValueChanged="_playbackVolume_ValueChanged" Grid.Row="1"/>
-                <Label x:Name="_playbackVolumeLabel" Grid.Row="1" Grid.Column="2" />
+                        ValueChanged="_playbackVolume_ValueChanged" Grid.Row="2"/>
+                <Label x:Name="_playbackVolumeLabel" Grid.Row="2" Grid.Column="2" />
 
-                <StackPanel Orientation="Horizontal" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
+                <StackPanel Orientation="Horizontal" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2">
                     <Ellipse x:Name="_redLed" Width="16" Height="16" Stroke="Silver" Fill="White" Margin="3"/>
                     <Ellipse x:Name="_greenLed" Width="16" Height="16" Stroke="Silver" Fill="White" Margin="3"/>
                 </StackPanel>
 
-                <CheckBox x:Name="_enabled" IsEnabled="False" Grid.Row="3" Grid.Column="1" Content="Enabled" Margin="3" Grid.ColumnSpan="2" />
-                <CheckBox x:Name="_recording" IsEnabled="False" Grid.Row="4" Grid.Column="1" Content="Recording" Margin="3" Grid.ColumnSpan="2" />
-                <CheckBox x:Name="_playing" IsEnabled="False" Grid.Row="5" Grid.Column="1" Content="Playing" Margin="3" Grid.ColumnSpan="2" />
+                <CheckBox x:Name="_enabled" IsEnabled="False" Grid.Row="4" Grid.Column="1" Content="Enabled" Margin="3" Grid.ColumnSpan="2" />
+                <CheckBox x:Name="_recording" IsEnabled="False" Grid.Row="5" Grid.Column="1" Content="Recording" Margin="3" Grid.ColumnSpan="2" />
+                <CheckBox x:Name="_playing" IsEnabled="False" Grid.Row="6" Grid.Column="1" Content="Playing" Margin="3" Grid.ColumnSpan="2" />
             </Grid>
             <StackPanel Orientation="Horizontal" Grid.RowSpan="99" Grid.ColumnSpan="99" HorizontalAlignment="Right" VerticalAlignment="Bottom">
                 <Button x:Name="_identify" Content="Identify" Margin="3" Click="_identify_Click" Padding="5,3" />
+                <Button x:Name="_restart" Content="Restart" Margin="3" Click="_restart_Click" Padding="5,3" />
                 <Button x:Name="_remove" Content="Remove" Margin="3" Click="_remove_Click" Padding="5,3" />
             </StackPanel>
         </Grid>

@@ -6,15 +6,18 @@ namespace IntercomTest;
 
 internal partial class RealDeviceControl
 {
+    private readonly string _latestFirmwareVersion;
     public DeviceConfiguration? Configuration { get; private set; }
     public string DeviceId { get; }
 
     public event EventHandler? RemoveClicked;
     public event EventHandler<double>? VolumeChanged;
     public event EventHandler? IdentifyClicked;
+    public event EventHandler? RestartClicked;
 
-    public RealDeviceControl(string deviceId)
+    public RealDeviceControl(string deviceId, string latestFirmwareVersion)
     {
+        _latestFirmwareVersion = latestFirmwareVersion;
         DeviceId = deviceId;
 
         InitializeComponent();
@@ -39,6 +42,14 @@ internal partial class RealDeviceControl
         Configuration = configuration;
 
         _name.Content = configuration.Device?.Name;
+
+        var firmwareVersion = configuration.Device?.FirmwareVersion;
+        if (firmwareVersion == _latestFirmwareVersion)
+            firmwareVersion += " (up to date)";
+        else
+            firmwareVersion += $" (latest {_latestFirmwareVersion})";
+
+        _firmwareVersion.Content = firmwareVersion;
     }
 
     private void _playbackVolume_ValueChanged(
@@ -59,9 +70,22 @@ internal partial class RealDeviceControl
 
     private void _identify_Click(object sender, RoutedEventArgs e) => OnIdentifyClicked();
 
+    private async void _restart_Click(object sender, RoutedEventArgs e)
+    {
+        _restart.IsEnabled = false;
+
+        OnRestartClicked();
+
+        await Task.Delay(TimeSpan.FromSeconds(1));
+
+        _restart.IsEnabled = true;
+    }
+
     protected virtual void OnRemoveClicked() => RemoveClicked?.Invoke(this, EventArgs.Empty);
 
     protected virtual void OnVolumeChanged(double e) => VolumeChanged?.Invoke(this, e);
 
     protected virtual void OnIdentifyClicked() => IdentifyClicked?.Invoke(this, EventArgs.Empty);
+
+    protected virtual void OnRestartClicked() => RestartClicked?.Invoke(this, EventArgs.Empty);
 }

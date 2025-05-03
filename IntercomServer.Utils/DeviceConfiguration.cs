@@ -23,4 +23,9 @@ public record DeviceAudioFormat(string? ChannelLayout, int? SampleRate, int? Bit
     }
 }
 
-public record DeviceDeviceConfiguration(string? Manufacturer, string? Model, string? Name);
+public record DeviceDeviceConfiguration(
+    string? Manufacturer,
+    string? Model,
+    string? Name,
+    string? FirmwareVersion
+);

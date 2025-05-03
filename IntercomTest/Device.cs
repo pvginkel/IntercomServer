@@ -97,7 +97,7 @@ internal class Device(string deviceId, IPEndPoint localEndPoint)
                 DeviceAudioFormat.FromAudioFormat(Constants.AudioFormat),
                 DeviceAudioFormat.FromAudioFormat(Constants.AudioFormat)
             ),
-            new DeviceDeviceConfiguration("Pieter", "Test Intercom", DeviceId),
+            new DeviceDeviceConfiguration("Pieter", "Test Intercom", DeviceId, "develop"),
             $"{localEndPoint.Address}:{localEndPoint.Port}"
         );
     }
