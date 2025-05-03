@@ -40,15 +40,6 @@ public partial class MainWindow
         IsEnabled = false;
 
         LoadDevices();
-
-        using (var key = App.BaseKey)
-        {
-            _autoAccept.IsChecked = key.GetValue("Auto Accept") switch
-            {
-                int value => value != 0,
-                _ => false
-            };
-        }
     }
 
     private async void BaseWindow_Loaded(object sender, RoutedEventArgs e)
@@ -80,6 +71,15 @@ public partial class MainWindow
 
             await _client.SubscribeAsync("intercom/client/+/configuration");
             await _client.SubscribeAsync("intercom/client/+/state");
+
+            using (var key = App.BaseKey)
+            {
+                _autoAccept.IsChecked = key.GetValue("Auto Accept") switch
+                {
+                    int value => value != 0,
+                    _ => false
+                };
+            }
 
 #if false
             await Task.Delay(TimeSpan.FromSeconds(0.1));

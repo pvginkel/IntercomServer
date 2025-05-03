@@ -30,7 +30,7 @@
 
                 <Label Content="Playback volume:" Grid.Row="1" />
                 <local:CustomSlider x:Name="_playbackVolume" Grid.Column="1" Margin="3" VerticalAlignment="Center"
-                        Minimum="-40" Maximum="-10" LargeChange="1" SmallChange="0.2"
+                        Minimum="-20" Maximum="-6" LargeChange="1" SmallChange="0.2"
                         ValueChanged="_playbackVolume_ValueChanged" Grid.Row="1"/>
                 <Label x:Name="_playbackVolumeLabel" Grid.Row="1" Grid.Column="2" />
 
