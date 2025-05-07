@@ -7,6 +7,8 @@ namespace IntercomTest;
 internal partial class RealDeviceControl
 {
     private readonly string _latestFirmwareVersion;
+    private int _suppressUpdate;
+
     public DeviceConfiguration? Configuration { get; private set; }
     public string DeviceId { get; }
 
@@ -27,14 +29,21 @@ internal partial class RealDeviceControl
 
     public void SetState(DeviceState state)
     {
-        _innerGrid.IsEnabled = state.Online.GetValueOrDefault();
-
-        _playbackVolume.Value = state.Volume.GetValueOrDefault();
-        _redLed.Fill = state.RedLed.GetValueOrDefault() ? Brushes.Red : Brushes.White;
-        _greenLed.Fill = state.GreenLed.GetValueOrDefault() ? Brushes.Green : Brushes.White;
-        _enabled.IsChecked = state.Enabled.GetValueOrDefault();
-        _recording.IsChecked = state.Recording.GetValueOrDefault();
-        _playing.IsChecked = state.Playing.GetValueOrDefault();
+        _suppressUpdate++;
+        try
+        {
+            _innerGrid.IsEnabled = state.Online.GetValueOrDefault();
+            _playbackVolume.Value = state.Volume.GetValueOrDefault();
+            _redLed.Fill = state.RedLed.GetValueOrDefault() ? Brushes.Red : Brushes.White;
+            _greenLed.Fill = state.GreenLed.GetValueOrDefault() ? Brushes.Green : Brushes.White;
+            _enabled.IsChecked = state.Enabled.GetValueOrDefault();
+            _recording.IsChecked = state.Recording.GetValueOrDefault();
+            _playing.IsChecked = state.Playing.GetValueOrDefault();
+        }
+        finally
+        {
+            _suppressUpdate--;
+        }
     }
 
     public void SetConfiguration(DeviceConfiguration configuration)
@@ -57,6 +66,9 @@ internal partial class RealDeviceControl
         RoutedPropertyChangedEventArgs<double> e
     )
     {
+        if (_suppressUpdate > 0)
+            return;
+
         var value = Math.Round(e.NewValue, 2);
 
         if (_playbackVolumeLabel != null)

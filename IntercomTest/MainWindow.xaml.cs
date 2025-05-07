@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls.Primitives;
 using IntercomServer.Utils;
 using MQTTnet;
+using MQTTnet.Diagnostics.Logger;
 using Serilog;
 
 namespace IntercomTest;
@@ -21,6 +22,7 @@ public partial class MainWindow
     private readonly Dictionary<string, DeviceState> _deviceStates =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Task<string> _latestFirmwareVersion;
+    private AECTestWindow? _aecTestWindow;
 
     public MainWindow()
     {
@@ -84,10 +86,10 @@ public partial class MainWindow
                 };
             }
 
-#if false
+#if true
             await Task.Delay(TimeSpan.FromSeconds(0.1));
 
-            _aecTest.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            _aecTest.PerformClick();
 #endif
         }
         catch (Exception ex)
@@ -384,9 +386,14 @@ public partial class MainWindow
             .Select(p => new DeviceRef(p.DeviceId, p.Configuration!))
             .ToList();
 
-        var window = new AECTestWindow(_client, devices) { Owner = this, Icon = Icon };
+        if (_aecTestWindow == null)
+        {
+            _aecTestWindow = new AECTestWindow(_client, devices) { Owner = this, Icon = Icon };
 
-        window.ShowDialog();
+            _aecTestWindow.Closed += (_, _) => _aecTestWindow = null;
+        }
+
+        _aecTestWindow.Show();
     }
 
     private async Task<string> LoadLatestFirmwareVersion()

@@ -3,7 +3,6 @@ using System.IO;
 using System.Net;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Forms;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -17,6 +16,15 @@ namespace IntercomTest;
 
 internal partial class AECTestWindow
 {
+    private enum State
+    {
+        None,
+        Recording,
+        Playing
+    }
+
+    private const string SampleFileName = "sample.wav";
+
     private readonly IMqttClient _client;
     private readonly IntercomUDPServer _udpServer = new(5140);
     private WriteableBitmap? _bitmap;
@@ -24,6 +32,7 @@ internal partial class AECTestWindow
     private DeviceRef? _listeningDevice;
     private readonly string _udpServerEndpoint;
     private WaveFileWriter? _writer;
+    private State _state = State.None;
 
     public AECTestWindow(IMqttClient client, List<DeviceRef> devices)
     {
@@ -41,7 +50,6 @@ internal partial class AECTestWindow
         using var key = App.BaseKey;
 
         var lastDevice = key.GetValue("AEC Device") as string;
-        _fileName.Text = key.GetValue("AEC File Name") as string ?? "";
         _spectrogram.IsChecked = (key.GetValue("AEC Spectrogram") as int?).GetValueOrDefault() != 0;
 
         _device.Items.Add("");
@@ -60,6 +68,19 @@ internal partial class AECTestWindow
         }
 
         Dispatcher.BeginInvoke(RecreateBitmap, DispatcherPriority.Render);
+
+        UpdateEnabled();
+    }
+
+    private void UpdateEnabled()
+    {
+        _clearSample.IsEnabled = _playSample.IsEnabled =
+            File.Exists(SampleFileName) && _state == State.None && _listeningDevice != null;
+        _recordSample.IsEnabled = _listeningDevice != null && _state == State.None;
+        _recordSample.Visibility =
+            _state == State.Recording ? Visibility.Collapsed : Visibility.Visible;
+        _stopRecordingSample.Visibility =
+            _state == State.Recording ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async Task _client_ApplicationMessageReceivedAsync(
@@ -141,6 +162,8 @@ internal partial class AECTestWindow
 
         if (_listeningDevice != null)
             await ConfigureDevice(_listeningDevice.DeviceId, true);
+
+        UpdateEnabled();
     }
 
     private async Task ConfigureDevice(string deviceId, bool enable)
@@ -160,29 +183,16 @@ internal partial class AECTestWindow
         RecreateBitmap();
     }
 
-    private void _selectFile_Click(object sender, RoutedEventArgs e)
+    private void _playSample_Click(object sender, RoutedEventArgs e)
     {
-        using var form = new OpenFileDialog();
-
-        form.Filter = "Wave Files (*.wav)|*.wav|All Files (*.*)|*.*";
-        form.RestoreDirectory = true;
-
-        if (form.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-        {
-            using var key = App.BaseKey;
-
-            key.SetValue("AEC File Name", form.FileName);
-
-            _fileName.Text = form.FileName;
-        }
-    }
-
-    private void _playFile_Click(object sender, RoutedEventArgs e)
-    {
-        if (!File.Exists(_fileName.Text))
+        if (!File.Exists(SampleFileName))
             return;
 
-        using var reader = new WaveFileReader(_fileName.Text);
+        _state = State.Playing;
+
+        UpdateEnabled();
+
+        using var reader = new WaveFileReader(SampleFileName);
 
         var sampleProvider = reader.ToSampleProvider();
 
@@ -266,6 +276,10 @@ internal partial class AECTestWindow
 
             _writer?.Dispose();
             _writer = null;
+
+            _state = State.None;
+
+            Dispatcher.BeginInvoke(UpdateEnabled);
         }
     }
 
@@ -297,5 +311,31 @@ internal partial class AECTestWindow
         key.SetValue("AEC Spectrogram", _spectrogram.IsChecked.GetValueOrDefault() ? 1 : 0);
 
         RecreateBitmap();
+    }
+
+    private void _recordSample_Click(object sender, RoutedEventArgs e)
+    {
+        _state = State.Recording;
+
+        UpdateEnabled();
+
+        _writer = new WaveFileWriter(SampleFileName, new WaveFormat(16000, 16, 1));
+    }
+
+    private void _clearSample_Click(object sender, RoutedEventArgs e)
+    {
+        File.Delete(SampleFileName);
+
+        UpdateEnabled();
+    }
+
+    private void _stopRecordingSample_Click(object sender, RoutedEventArgs e)
+    {
+        _writer?.Dispose();
+        _writer = null;
+
+        _state = State.None;
+
+        UpdateEnabled();
     }
 }

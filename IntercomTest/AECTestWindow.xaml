@@ -18,19 +18,18 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <ToolBar Grid.ColumnSpan="99">
-            <Button x:Name="_playFile" Content="Play" Click="_playFile_Click"/>
-            <Separator/>
             <ToggleButton x:Name="_spectrogram" Content="Spectrogram" Checked="_spectrogram_Checked" Unchecked="_spectrogram_Checked" />
         </ToolBar>
         <Label Grid.Row="1">Device</Label>
-        <ComboBox x:Name="_device" Grid.Column="1" Grid.ColumnSpan="2" Margin="3" SelectionChanged="_device_SelectionChanged" Grid.Row="1"/>
-        <Label Grid.Row="2">Audio file:</Label>
-        <TextBox x:Name="_fileName" Grid.Column="1" Grid.Row="2" Margin="3" IsReadOnly="True" VerticalAlignment="Center"/>
-        <StackPanel Orientation="Horizontal" Grid.Column="2" Grid.Row="2">
-            <Button x:Name="_selectFile" Content="Select" Margin="3" Padding="5,3" Click="_selectFile_Click"/>
+        <ComboBox x:Name="_device" Grid.Column="1" Margin="3" SelectionChanged="_device_SelectionChanged" Grid.Row="1"/>
+        <Label Grid.Row="2">Audio sample:</Label>
+        <StackPanel Orientation="Horizontal" Grid.Column="1" Grid.Row="2">
+            <Button x:Name="_recordSample" Content="Record" Margin="3" Padding="5,3" Click="_recordSample_Click"/>
+            <Button x:Name="_stopRecordingSample" Content="Stop Record" Margin="3" Padding="5,3" Click="_stopRecordingSample_Click"/>
+            <Button x:Name="_clearSample" Content="Clear" Margin="3" Padding="5,3" Click="_clearSample_Click"/>
+            <Button x:Name="_playSample" Content="Play" Margin="3" Padding="5,3" Click="_playSample_Click"/>
         </StackPanel>
         <Border x:Name="_waveImageContainer" Grid.Row="3" Grid.ColumnSpan="3" Margin="3" SizeChanged="_waveImageContainer_SizeChanged">
             <Image x:Name="_waveImage"/>
