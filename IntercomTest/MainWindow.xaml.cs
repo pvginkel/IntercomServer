@@ -3,10 +3,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
-using System.Windows.Controls.Primitives;
 using IntercomServer.Utils;
 using MQTTnet;
-using MQTTnet.Diagnostics.Logger;
 using Serilog;
 
 namespace IntercomTest;

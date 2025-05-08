@@ -23,7 +23,7 @@ internal partial class AECTestWindow
         Playing
     }
 
-    private const string SampleFileName = "sample.wav";
+    private const string SampleFileName = "AEC Sample.wav";
 
     private readonly IMqttClient _client;
     private readonly IntercomUDPServer _udpServer = new(5140);
@@ -33,6 +33,7 @@ internal partial class AECTestWindow
     private readonly string _udpServerEndpoint;
     private WaveFileWriter? _writer;
     private State _state = State.None;
+    private int _nextIndex;
 
     public AECTestWindow(IMqttClient client, List<DeviceRef> devices)
     {
@@ -105,6 +106,12 @@ internal partial class AECTestWindow
 
     private void _udpServer_Data(object? sender, IntercomUDPDataEventArgs e)
     {
+        var index = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(e.Data));
+
+        if (index != _nextIndex)
+            Log.Information("Expected index {NextIndex} got {Index}", _nextIndex, index);
+        _nextIndex = index + 1;
+
         _writer?.Write(e.Data.AsSpan(4));
 
         if (_renderer == null)
@@ -316,6 +323,7 @@ internal partial class AECTestWindow
     private void _recordSample_Click(object sender, RoutedEventArgs e)
     {
         _state = State.Recording;
+        _nextIndex = 0;
 
         UpdateEnabled();
 
