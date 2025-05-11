@@ -111,6 +111,7 @@ internal class Device(string deviceId, IPEndPoint localEndPoint)
             GreenLed?.State is DeviceLedState.On or DeviceLedState.Blink,
             IsPlaying,
             IsRecording,
+            null,
             null
         );
     }

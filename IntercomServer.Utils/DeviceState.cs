@@ -7,5 +7,6 @@ public record DeviceState(
     bool? GreenLed,
     bool? Playing,
     bool? Recording,
-    double? Volume
+    double? Volume,
+    AudioConfiguration? AudioConfig
 );

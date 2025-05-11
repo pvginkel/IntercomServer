@@ -246,6 +246,39 @@ public partial class MainWindow
                 }
             };
 
+            device.EnabledChanged += async (s, e) =>
+            {
+                try
+                {
+                    await _client.PublishStringAsync(
+                        $"intercom/client/{deviceId}/set/enabled",
+                        e.IsEnabled ? "true" : "false"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Failed to changed the enabled status");
+                }
+            };
+
+            device.AudioConfigChanged += async (s, e) =>
+            {
+                try
+                {
+                    await _client.PublishStringAsync(
+                        $"intercom/client/{deviceId}/set/audio_config",
+                        JsonSerializer.Serialize(
+                            e.AudioConfig,
+                            IntercomClient.JsonSerializerOptions
+                        )
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Failed to changed the audio configuration");
+                }
+            };
+
             _devices.Children.Add(device);
         }
 

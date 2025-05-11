@@ -1,0 +1,61 @@
+﻿<local:BaseWindow x:Class="IntercomTest.AudioConfigurationWindow"
+                  x:ClassModifier="internal"
+                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                  xmlns:local="clr-namespace:IntercomTest"
+                  mc:Ignorable="d"
+                  Title="Audio Configuration" Width="500" SizeToContent="Height"
+                  WindowStartupLocation="CenterOwner">
+    <Grid Margin="6">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Label Content="Volume scale start (low end):"/>
+        <TextBox x:Name="_volumeScaleLow" Grid.Column="1" Margin="3" PreviewTextInput="PreviewDoubleTextBox" TextChanged="InputChanged"/>
+
+        <Label Content="Volume scale end (high end):" Grid.Row="1"/>
+        <TextBox x:Name="_volumeScaleHigh" Grid.Row="1" Grid.Column="1" Margin="3" PreviewTextInput="PreviewDoubleTextBox" TextChanged="InputChanged"/>
+
+        <CheckBox x:Name="_enableAudioProcessing" Content="Enable audio processing" Grid.Row="2" Grid.Column="1" Margin="3"/>
+
+        <Label Content="Audio buffer (ms):" Grid.Row="3"/>
+        <TextBox x:Name="_audioBufferMs" Grid.Row="3" Grid.Column="1" Margin="3" PreviewTextInput="PreviewIntegerTextBox" TextChanged="InputChanged"/>
+
+        <Label Content="Microphone gain bits:" Grid.Row="4"/>
+        <TextBox x:Name="_microphoneGainBits" Grid.Row="4" Grid.Column="1" Margin="3" PreviewTextInput="PreviewIntegerTextBox" TextChanged="InputChanged"/>
+
+        <CheckBox x:Name="_recordingAutoVolumeEnabled" Content="Recording auto volume enabled" Grid.Row="5" Grid.Column="1" Margin="3"/>
+
+        <Label Content="Recording smoothing factor:" Grid.Row="6"/>
+        <TextBox x:Name="_recordingSmoothingFactor" Grid.Row="6" Grid.Column="1" Margin="3" PreviewTextInput="PreviewDoubleTextBox" TextChanged="InputChanged"/>
+
+        <CheckBox x:Name="_playbackAutoVolumeEnabled" Content="Playback auto volume enabled" Grid.Row="7" Grid.Column="1" Margin="3"/>
+
+        <Label Content="Playback target Db:" Grid.Row="8"/>
+        <TextBox x:Name="_playbackTargetDb" Grid.Row="8" Grid.Column="1" Margin="3" PreviewTextInput="PreviewDoubleTextBox" TextChanged="InputChanged"/>
+
+        <StackPanel Orientation="Horizontal" Grid.Row="9" Grid.ColumnSpan="2" HorizontalAlignment="Right">
+            <Button x:Name="_copy" Content="Copy" Margin="3" Click="_copy_Click" Padding="5,3" />
+            <Button x:Name="_paste" Content="Paste" Margin="3" Click="_paste_Click" Padding="5,3" />
+            <Border Margin="0,6" BorderBrush="Silver" BorderThickness="1,0,0,0" />
+            <Button x:Name="_ok" Content="OK" Margin="3" Click="_ok_Click" Padding="5,3" IsDefault="True" />
+            <Button x:Name="_cancel" Content="Cancel" Margin="3" Click="_cancel_Click" Padding="5,3" IsCancel="True" />
+        </StackPanel>
+    </Grid>
+</local:BaseWindow>
