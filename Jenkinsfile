@@ -27,7 +27,7 @@ podTemplate(inheritFrom: 'jenkins-agent-large kaniko', containers: [
         }
 
         stage('Redeploy IntercomServer') {
-            build job: 'HelmCharts', wait: false
+            cicd.helmDeploy()
         }
     }
 }
