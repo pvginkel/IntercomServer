@@ -1,0 +1,66 @@
+schemaVersion: "0.1"
+producer: intercom-server
+
+# Intercom Server — .NET container that relays audio between Intercom devices.
+# Purely MQTT-driven (no HTTP API): it subscribes to intercom/server|client
+# topics and relays/triggers playback on devices, brokering the peer UDP audio.
+#
+# The intercom protocol IS the MQTT topic contract (intercom/client/<id>/...,
+# intercom/server/...), hardcoded in both the server and the device firmware.
+# It is modeled as the ApplicationService this server realizes, exposed via an
+# ApplicationInterface (the topic namespace) that the Intercom devices consume.
+# The service rides the MQTT broker as transport (cap:pub-sub-broker), which the
+# server also consumes directly.
+#
+# environment/cluster stay unset — per-env placement is the deployer's job.
+
+applicationComponents:
+  - id: app:intercom-server,c313fb20-b8df-4f6c-be1b-23af65e26705
+    label: Intercom Server
+    summary: >-
+      .NET service that orchestrates the home audio intercom: it subscribes to
+      the intercom MQTT topics, relays call events, and triggers playback on the
+      Intercom devices.
+    introduced: 2025-02-17
+    lifecycle: active
+    stereotype: SoftwareProduct
+    sourceRepository: git:pvginkel/IntercomServer
+    stats:
+      image: registry:5000/intercom-server
+
+applicationServices:
+  - id: svc:intercom,5914e568-7f39-461a-91fe-9981d5275fe1
+    label: Intercom relay
+    summary: >-
+      The intercom call/relay service: device registration, call routing, and
+      audio-endpoint brokering, spoken over a fixed MQTT topic contract.
+    introduced: 2025-02-17
+    lifecycle: active
+
+applicationInterfaces:
+  - id: if:intercom-mqtt,89b96676-c3bb-4eb5-a00a-985e57f59475
+    label: Intercom MQTT topic protocol
+    summary: >-
+      The hardcoded MQTT topic namespace (intercom/client/<id>/state and /set/+,
+      intercom/server/...) that Intercom devices use to register, receive control
+      and the peer UDP endpoints to stream audio to.
+    introduced: 2025-02-17
+    lifecycle: active
+
+relations:
+  # The server realizes the intercom relay service, exposed via the topic interface.
+  - id: rel:intercom-server-realizes-intercom
+    source: app:intercom-server,c313fb20-b8df-4f6c-be1b-23af65e26705
+    target: svc:intercom,5914e568-7f39-461a-91fe-9981d5275fe1
+    type: Realization
+  - id: rel:intercom-mqtt-if-assigned
+    source: if:intercom-mqtt,89b96676-c3bb-4eb5-a00a-985e57f59475
+    target: svc:intercom,5914e568-7f39-461a-91fe-9981d5275fe1
+    type: Assignment
+
+  # Substitutable infra — MQTT broker (the transport), bound at deploy time via env.
+  - id: rel:intercom-server-consumes-pub-sub
+    source: app:intercom-server,c313fb20-b8df-4f6c-be1b-23af65e26705
+    target: cap:pub-sub-broker
+    type: Association
+    boundBy: "env:MQTT_HOST"
