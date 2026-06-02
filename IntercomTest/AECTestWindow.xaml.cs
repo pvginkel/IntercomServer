@@ -286,7 +286,7 @@ internal partial class AECTestWindow
 
             _state = State.None;
 
-            Dispatcher.BeginInvoke(UpdateEnabled);
+            await Dispatcher.BeginInvoke(UpdateEnabled);
         }
     }
 

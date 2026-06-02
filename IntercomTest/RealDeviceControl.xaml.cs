@@ -7,7 +7,6 @@ namespace IntercomTest;
 
 internal partial class RealDeviceControl
 {
-    private readonly string _latestFirmwareVersion;
     private int _suppressUpdate;
     private AudioConfiguration? _audioConfig;
 
@@ -21,9 +20,8 @@ internal partial class RealDeviceControl
     public event EventHandler<EnabledEventArgs>? EnabledChanged;
     public event EventHandler<AudioConfigurationEventArgs>? AudioConfigChanged;
 
-    public RealDeviceControl(string deviceId, string latestFirmwareVersion)
+    public RealDeviceControl(string deviceId)
     {
-        _latestFirmwareVersion = latestFirmwareVersion;
         DeviceId = deviceId;
 
         InitializeComponent();
@@ -66,14 +64,6 @@ internal partial class RealDeviceControl
         Configuration = configuration;
 
         _name.Content = configuration.Device?.Name;
-
-        var firmwareVersion = configuration.Device?.FirmwareVersion;
-        if (firmwareVersion == _latestFirmwareVersion)
-            firmwareVersion += " (up to date)";
-        else
-            firmwareVersion += $" (latest {_latestFirmwareVersion})";
-
-        _firmwareVersion.Content = firmwareVersion;
     }
 
     private void _playbackVolume_ValueChanged(
