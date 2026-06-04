@@ -1,4 +1,4 @@
-library('JenkinsPipelineUtils') _
+library identifier: 'JenkinsPipelineUtils', changelog: false
 
 podTemplate(inheritFrom: 'jenkins-agent-large kaniko', containers: [
     containerTemplate(name: 'dotnet-sdk', image: 'mcr.microsoft.com/dotnet/sdk:9.0', command: 'sleep', args: 'infinity', alwaysPullImage: true)
