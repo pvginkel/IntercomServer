@@ -2,6 +2,7 @@
 // raises OPENAI002. We knowingly depend on it; suppress the diagnostic for this file.
 #pragma warning disable OPENAI002
 
+using System.Globalization;
 using System.Net;
 using IntercomServer.ChatGpt.Audio;
 using IntercomServer.Utils;
@@ -390,11 +391,41 @@ internal sealed class Conversation
         }
     }
 
+    // Substitutes dynamic placeholders in the instructions. Done per conversation so the
+    // current date/time is fresh rather than frozen at server startup.
+    private string BuildInstructions()
+    {
+        var culture = ResolveCulture(_configuration.Locale);
+        var now = DateTime.Now.ToString("f", culture);
+
+        return _configuration.Instructions.Replace("{NOW}", now);
+    }
+
+    private static CultureInfo ResolveCulture(string? locale)
+    {
+        if (string.IsNullOrWhiteSpace(locale))
+            return CultureInfo.CurrentCulture;
+
+        try
+        {
+            return CultureInfo.GetCultureInfo(locale);
+        }
+        catch (CultureNotFoundException)
+        {
+            Logger.Warning(
+                "Unknown CHATGPT_LOCALE '{Locale}'; using {Culture}.",
+                locale,
+                CultureInfo.CurrentCulture.Name
+            );
+            return CultureInfo.CurrentCulture;
+        }
+    }
+
     private RealtimeConversationSessionOptions BuildSessionOptions()
     {
         var options = new RealtimeConversationSessionOptions
         {
-            Instructions = _configuration.Instructions,
+            Instructions = BuildInstructions(),
             AudioOptions = new RealtimeConversationSessionAudioOptions
             {
                 InputAudioOptions = new RealtimeConversationSessionInputAudioOptions

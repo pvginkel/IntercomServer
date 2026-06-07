@@ -62,6 +62,7 @@ var builder = new HostBuilder().ConfigureServices(
                     ? searchModel
                     : "gpt-5.5",
                 Voice = Env("CHATGPT_VOICE") is { Length: > 0 } voice ? voice : "marin",
+                Locale = Env("CHATGPT_LOCALE"),
                 Instructions = ResolveInstructions(),
                 McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                     ? mcpFile

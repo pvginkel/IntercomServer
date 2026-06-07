@@ -17,6 +17,12 @@ internal class ChatGptConfiguration
     public string WebSearchModel { get; init; } = "gpt-5.5";
 
     /// <summary>
+    /// Culture used to format dynamic values substituted into the instructions, such as the
+    /// <c>{NOW}</c> placeholder (e.g. <c>nl-NL</c>). When empty, the host's current culture.
+    /// </summary>
+    public string? Locale { get; init; }
+
+    /// <summary>
     /// Voice name. One of the OpenAI realtime voices (alloy, ash, ballad, cedar,
     /// coral, echo, marin, sage, shimmer, verse).
     /// </summary>
