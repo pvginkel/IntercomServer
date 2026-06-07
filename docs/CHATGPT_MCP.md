@@ -29,7 +29,8 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `OPENAI_API_KEY` | **yes** | — | OpenAI API key. When empty the whole feature is disabled. |
 | `CHATGPT_MODEL` | no | `gpt-realtime` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
-| `CHATGPT_INSTRUCTIONS` | no | a built‑in persona | System prompt / persona for the assistant. |
+| `CHATGPT_INSTRUCTIONS` | no | a built‑in persona | System prompt / persona for the assistant (inline). |
+| `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt. Takes precedence over `CHATGPT_INSTRUCTIONS`; read at startup. |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
 | `CHATGPT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the 16 kHz stream sent to the device). |
 

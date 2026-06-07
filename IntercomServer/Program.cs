@@ -8,6 +8,32 @@ using Serilog;
 
 static string? Env(string name) => Environment.GetEnvironmentVariable(name);
 
+// Resolves the ChatGPT system prompt: a file (CHATGPT_INSTRUCTIONS_FILE) takes precedence,
+// then an inline value (CHATGPT_INSTRUCTIONS), otherwise the built-in default.
+static string ResolveInstructions()
+{
+    var file = Env("CHATGPT_INSTRUCTIONS_FILE");
+    if (!string.IsNullOrEmpty(file))
+    {
+        try
+        {
+            return File.ReadAllText(file);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(
+                ex,
+                "Could not read CHATGPT_INSTRUCTIONS_FILE '{File}'; falling back to CHATGPT_INSTRUCTIONS / default.",
+                file
+            );
+        }
+    }
+
+    return Env("CHATGPT_INSTRUCTIONS") is { Length: > 0 } instructions
+        ? instructions
+        : new ChatGptConfiguration().Instructions;
+}
+
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
@@ -33,9 +59,7 @@ var builder = new HostBuilder().ConfigureServices(
                 ApiKey = Env("OPENAI_API_KEY"),
                 Model = Env("CHATGPT_MODEL") is { Length: > 0 } model ? model : "gpt-realtime",
                 Voice = Env("CHATGPT_VOICE") is { Length: > 0 } voice ? voice : "marin",
-                Instructions = Env("CHATGPT_INSTRUCTIONS") is { Length: > 0 } instructions
-                    ? instructions
-                    : new ChatGptConfiguration().Instructions,
+                Instructions = ResolveInstructions(),
                 McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                     ? mcpFile
                     : "mcpservers.json",
