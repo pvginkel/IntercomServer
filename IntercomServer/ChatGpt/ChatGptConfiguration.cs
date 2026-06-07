@@ -13,6 +13,9 @@ internal class ChatGptConfiguration
     /// <summary>Realtime model name, e.g. <c>gpt-realtime</c> or <c>gpt-realtime-2</c>.</summary>
     public string Model { get; init; } = "gpt-realtime";
 
+    /// <summary>Model used for the <c>web_search</c> tool's Responses API call.</summary>
+    public string WebSearchModel { get; init; } = "gpt-5.5";
+
     /// <summary>
     /// Voice name. One of the OpenAI realtime voices (alloy, ash, ballad, cedar,
     /// coral, echo, marin, sage, shimmer, verse).

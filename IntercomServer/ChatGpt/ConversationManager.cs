@@ -13,6 +13,7 @@ namespace IntercomServer.ChatGpt;
 internal sealed class ConversationManager(
     ChatGptConfiguration configuration,
     McpToolRegistry mcp,
+    WebSearchTool webSearch,
     AudioSender audioSender,
     UdpAudioServer audioServer
 )
@@ -49,6 +50,7 @@ internal sealed class ConversationManager(
             device,
             configuration,
             mcp,
+            webSearch,
             audioSender,
             audioServer,
             OnConversationEnded

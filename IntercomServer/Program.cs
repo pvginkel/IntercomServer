@@ -58,6 +58,9 @@ var builder = new HostBuilder().ConfigureServices(
             {
                 ApiKey = Env("OPENAI_API_KEY"),
                 Model = Env("CHATGPT_MODEL") is { Length: > 0 } model ? model : "gpt-realtime",
+                WebSearchModel = Env("CHATGPT_WEB_SEARCH_MODEL") is { Length: > 0 } searchModel
+                    ? searchModel
+                    : "gpt-5.5",
                 Voice = Env("CHATGPT_VOICE") is { Length: > 0 } voice ? voice : "marin",
                 Instructions = ResolveInstructions(),
                 McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
@@ -85,6 +88,7 @@ var builder = new HostBuilder().ConfigureServices(
         ));
         services.AddSingleton<AudioEndpointResolver>();
         services.AddSingleton<McpToolRegistry>();
+        services.AddSingleton<WebSearchTool>();
         services.AddSingleton<ConversationManager>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());
     }

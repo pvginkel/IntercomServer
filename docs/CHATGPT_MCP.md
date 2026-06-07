@@ -29,6 +29,7 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `OPENAI_API_KEY` | **yes** | — | OpenAI API key. When empty the whole feature is disabled. |
 | `CHATGPT_MODEL` | no | `gpt-realtime` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
+| `CHATGPT_WEB_SEARCH_MODEL` | no | `gpt-5.5` | Model used by the built-in `web_search` tool (see below). |
 | `CHATGPT_INSTRUCTIONS` | no | a built‑in persona | System prompt / persona for the assistant (inline). |
 | `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt. Takes precedence over `CHATGPT_INSTRUCTIONS`; read at startup. |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
@@ -100,3 +101,7 @@ Adding an MCP server is a **config change only — no code**:
   `mcpservers.example.json` instead.
 - A built‑in `end_conversation` tool is always available to the model so it can
   hang up when you say goodbye.
+- A built‑in `web_search` tool is always available: when the model calls it, the server
+  runs a separate OpenAI Responses API request (`CHATGPT_WEB_SEARCH_MODEL`, default
+  `gpt-5.5`) with the hosted web‑search tool, low reasoning effort and a concise reasoning
+  summary, and feeds the answer back into the conversation.

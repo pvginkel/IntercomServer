@@ -34,6 +34,7 @@ internal sealed class Conversation
 
     private readonly ChatGptConfiguration _configuration;
     private readonly McpToolRegistry _mcp;
+    private readonly WebSearchTool _webSearch;
     private readonly AudioSender _audioSender;
     private readonly UdpAudioServer _audioServer;
     private readonly Action<Conversation> _onEnded;
@@ -61,6 +62,7 @@ internal sealed class Conversation
         Device device,
         ChatGptConfiguration configuration,
         McpToolRegistry mcp,
+        WebSearchTool webSearch,
         AudioSender audioSender,
         UdpAudioServer audioServer,
         Action<Conversation> onEnded
@@ -69,6 +71,7 @@ internal sealed class Conversation
         Device = device;
         _configuration = configuration;
         _mcp = mcp;
+        _webSearch = webSearch;
         _audioSender = audioSender;
         _audioServer = audioServer;
         _onEnded = onEnded;
@@ -309,11 +312,14 @@ internal sealed class Conversation
         string output;
         try
         {
-            output = await _mcp.CallAsync(name, arguments, cancellationToken);
+            output =
+                name == WebSearchTool.ToolName
+                    ? await _webSearch.SearchAsync(arguments, cancellationToken)
+                    : await _mcp.CallAsync(name, arguments, cancellationToken);
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "MCP tool {Tool} failed", name);
+            Logger.Error(ex, "Tool {Tool} failed", name);
             output = $"The tool failed: {ex.Message}";
         }
 
@@ -413,10 +419,22 @@ internal sealed class Conversation
         foreach (var tool in _mcp.GetRealtimeTools())
             options.Tools.Add(tool);
 
+        options.Tools.Add(BuildWebSearchTool());
         options.Tools.Add(BuildEndConversationTool());
 
         return options;
     }
+
+    private static RealtimeFunctionTool BuildWebSearchTool() =>
+        new(WebSearchTool.ToolName)
+        {
+            FunctionDescription =
+                "Search the web for current or factual information and return a concise answer. "
+                + "Use this for recent events, or anything you are unsure about.",
+            FunctionParameters = BinaryData.FromString(
+                """{"type":"object","properties":{"query":{"type":"string","description":"What to search the web for."}},"required":["query"],"additionalProperties":false}"""
+            ),
+        };
 
     private static RealtimeFunctionTool BuildEndConversationTool() =>
         new(EndConversationTool)
