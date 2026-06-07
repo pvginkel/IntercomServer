@@ -34,12 +34,17 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt. Takes precedence over `CHATGPT_INSTRUCTIONS`; read at startup. May contain the `{NOW}` placeholder (see below). |
 | `CHATGPT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
+| `CHATGPT_MEMORY_DIR` | no | — | Folder for the model's memories (see *Memory* below). When unset, the memory tools and `{MEMORIES}` are disabled. |
 | `CHATGPT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the 16 kHz stream sent to the device). |
 
 The system prompt may include the placeholder **`{NOW}`**, which is replaced at the start of
 each conversation with the current date and time as a natural, culture-specific long
 date + time (with `CHATGPT_LOCALE=nl-NL`, a Dutch-formatted date like *"… 7 juni 2026 15:45"*).
 It is substituted per conversation, so the time is always current rather than frozen at startup.
+
+The prompt may also include **`{MEMORIES}`**, replaced (per conversation) with a Markdown
+list of the stored memories — see *Memory* below. With no memories (or `CHATGPT_MEMORY_DIR`
+unset) it becomes empty.
 
 The server's UDP audio endpoint is a general (non‑ChatGPT) setting:
 
@@ -111,3 +116,28 @@ Adding an MCP server is a **config change only — no code**:
   runs a separate OpenAI Responses API request (`CHATGPT_WEB_SEARCH_MODEL`, default
   `gpt-5.5`) with the hosted web‑search tool, low reasoning effort and a concise reasoning
   summary, and feeds the answer back into the conversation.
+
+## Memory
+
+When `CHATGPT_MEMORY_DIR` is set, the model can remember things across conversations. Each
+memory is a single Markdown file in that folder (a flat list — no subfolders), named by its
+**slug**, which must end in `.md`. The **first line** of the file is its title, used as the
+summary. Four function tools are exposed to the model:
+
+| Tool | Arguments | Behaviour |
+| --- | --- | --- |
+| `list_memories` | — | Returns a Markdown list of `- [summary](slug)` for every memory. |
+| `get_memory` | `slug` | Returns the full Markdown content of that memory. |
+| `put_memory` | `slug`, `content` | Creates or overwrites the memory. Validated: the slug must end in `.md` and be a plain file name (no paths), and the first line of `content` must be a non‑empty title. |
+| `delete_memory` | `slug` | Deletes that memory. |
+
+The system prompt placeholder **`{MEMORIES}`** is replaced at the start of each conversation
+with the current `list_memories` output, e.g.:
+
+```
+- [Groceries to buy](groceries.md)
+- [Wifi password](wifi.md)
+```
+
+So the model sees what it has remembered, and can `get_memory` by slug to read the details.
+The folder is plain `.md` files, so you can read and edit them yourself.

@@ -14,6 +14,7 @@ internal sealed class ConversationManager(
     ChatGptConfiguration configuration,
     McpToolRegistry mcp,
     WebSearchTool webSearch,
+    MemoryStore memory,
     AudioSender audioSender,
     UdpAudioServer audioServer
 )
@@ -51,6 +52,7 @@ internal sealed class ConversationManager(
             configuration,
             mcp,
             webSearch,
+            memory,
             audioSender,
             audioServer,
             OnConversationEnded

@@ -57,7 +57,7 @@ var builder = new HostBuilder().ConfigureServices(
             new ChatGptConfiguration
             {
                 ApiKey = Env("OPENAI_API_KEY"),
-                Model = Env("CHATGPT_MODEL") is { Length: > 0 } model ? model : "gpt-realtime",
+                Model = Env("CHATGPT_MODEL") is { Length: > 0 } model ? model : "gpt-realtime-2",
                 WebSearchModel = Env("CHATGPT_WEB_SEARCH_MODEL") is { Length: > 0 } searchModel
                     ? searchModel
                     : "gpt-5.5",
@@ -67,13 +67,16 @@ var builder = new HostBuilder().ConfigureServices(
                 McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                     ? mcpFile
                     : "mcpservers.json",
+                MemoryDirectory = Env("CHATGPT_MEMORY_DIR"),
                 DebugAudioDirectory = Env("CHATGPT_DEBUG_AUDIO_DIR"),
             }
         );
         services.AddSingleton(
             new AudioServerConfiguration
             {
-                Port = string.IsNullOrEmpty(Env("AUDIO_PORT")) ? 5004 : int.Parse(Env("AUDIO_PORT")!),
+                Port = string.IsNullOrEmpty(Env("AUDIO_PORT"))
+                    ? 5004
+                    : int.Parse(Env("AUDIO_PORT")!),
                 Host = Env("AUDIO_HOST"),
             }
         );
@@ -90,6 +93,7 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton<AudioEndpointResolver>();
         services.AddSingleton<McpToolRegistry>();
         services.AddSingleton<WebSearchTool>();
+        services.AddSingleton<MemoryStore>();
         services.AddSingleton<ConversationManager>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());
     }

@@ -38,6 +38,12 @@ internal class ChatGptConfiguration
     public string McpConfigFile { get; init; } = "mcpservers.json";
 
     /// <summary>
+    /// Folder where conversation memories are stored as flat <c>.md</c> files (one per slug).
+    /// When empty, the memory tools and the <c>{MEMORIES}</c> placeholder are disabled.
+    /// </summary>
+    public string? MemoryDirectory { get; init; }
+
+    /// <summary>
     /// Debugging aid: when set, the audio received from OpenAI is also written to WAV files
     /// in this directory — both the raw 24 kHz stream and the 16 kHz stream sent to the
     /// device. Leave empty to disable.
