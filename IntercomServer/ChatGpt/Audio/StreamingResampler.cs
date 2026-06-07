@@ -21,6 +21,9 @@ internal sealed class StreamingResampler(int inputRate, int outputRate)
     // Trailing sample of the previous block (the sample at virtual index -1).
     private short _prev;
 
+    // Reusable input buffer, grown on demand to fit the largest block seen so far.
+    private short[] _samples = [];
+
     public byte[] Resample(ReadOnlySpan<byte> input)
     {
         if (inputRate == outputRate)
@@ -30,7 +33,10 @@ internal sealed class StreamingResampler(int inputRate, int outputRate)
         if (n == 0)
             return [];
 
-        Span<short> samples = n <= 1024 ? stackalloc short[n] : new short[n];
+        if (_samples.Length < n)
+            _samples = new short[n];
+
+        var samples = _samples.AsSpan(0, n);
         for (int i = 0; i < n; i++)
             samples[i] = (short)(input[i * 2] | (input[i * 2 + 1] << 8));
 

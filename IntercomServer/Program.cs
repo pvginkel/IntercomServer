@@ -20,12 +20,10 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton(
             new ServerConfiguration
             {
-                Host = Environment.GetEnvironmentVariable("MQTT_HOST"),
-                Port = string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MQTT_PORT"))
-                    ? null
-                    : int.Parse(Environment.GetEnvironmentVariable("MQTT_PORT")!),
-                Username = Environment.GetEnvironmentVariable("MQTT_USERNAME"),
-                Password = Environment.GetEnvironmentVariable("MQTT_PASSWORD")
+                Host = Env("MQTT_HOST"),
+                Port = string.IsNullOrEmpty(Env("MQTT_PORT")) ? null : int.Parse(Env("MQTT_PORT")!),
+                Username = Env("MQTT_USERNAME"),
+                Password = Env("MQTT_PASSWORD")
             }
         );
         services.AddSingleton(
