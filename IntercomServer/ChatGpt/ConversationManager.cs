@@ -62,6 +62,10 @@ internal sealed class ConversationManager(
             return false;
         }
 
+        // Keep MCP connections alive for the duration of this conversation; they are shared
+        // with any other conversations running concurrently and closed when the last ends.
+        mcp.BeginConversation();
+
         try
         {
             await conversation.StartAsync();
@@ -73,6 +77,7 @@ internal sealed class ConversationManager(
             Logger.Error(ex, "Failed to start ChatGPT conversation with device {Device}", device.DeviceId);
             _conversations.TryRemove(device.DeviceId, out _);
             conversation.Dispose();
+            mcp.EndConversation();
             return false;
         }
     }
@@ -91,6 +96,7 @@ internal sealed class ConversationManager(
     private void OnConversationEnded(Conversation conversation)
     {
         _conversations.TryRemove(conversation.Device.DeviceId, out _);
+        mcp.EndConversation();
 
         SessionEnded?.Invoke(this, conversation.Device);
     }

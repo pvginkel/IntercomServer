@@ -11,10 +11,18 @@ using Serilog;
 namespace IntercomServer.ChatGpt;
 
 /// <summary>
-/// Connects to the configured remote (HTTP) MCP servers as a client, discovers their
-/// tools, and exposes them to the OpenAI Realtime session as ordinary function tools.
-/// Tool calls coming back from the model are routed to the owning MCP server and executed
-/// here — the MCP servers themselves are never exposed to OpenAI or the public internet.
+/// Discovers the tools exposed by the configured remote (HTTP/SSE) MCP servers and exposes
+/// them to the OpenAI Realtime session as ordinary function tools. Tool calls coming back
+/// from the model are executed here against the owning MCP server — the servers themselves
+/// are never exposed to OpenAI or the public internet.
+///
+/// Tools are discovered once at startup (each discovery connection is closed immediately).
+/// Execution connections are opened lazily and kept alive only while at least one
+/// conversation is active (reference-counted via <see cref="BeginConversation"/> /
+/// <see cref="EndConversation"/>), then closed. This avoids a long-lived idle SSE session,
+/// which servers and proxies drop (a later call would otherwise fail with "No active SSE
+/// connection for session …"), while still sharing one connection across overlapping
+/// conversations.
 ///
 /// To add a new MCP server, drop an entry in the JSON config file (see docs/CHATGPT_MCP.md).
 /// No code changes are required.
@@ -27,9 +35,17 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
         new() { PropertyNameCaseInsensitive = true };
 
     private readonly Dictionary<string, RegisteredTool> _tools = new();
-    private readonly List<McpClient> _clients = [];
 
-    private record RegisteredTool(McpClient Client, McpClientTool Tool);
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, Task<McpClient>> _connections = new();
+    private int _activeConversations;
+
+    private sealed record RegisteredTool(
+        McpServerConfig Server,
+        string ToolName,
+        string Description,
+        BinaryData Parameters
+    );
 
     public async Task InitializeAsync()
     {
@@ -56,11 +72,12 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
             return;
         }
 
-        foreach (var server in config?.Servers ?? [])
+        var servers = config?.Servers ?? [];
+        foreach (var server in servers)
         {
             try
             {
-                await ConnectServerAsync(server);
+                await DiscoverServerAsync(server);
             }
             catch (Exception ex)
             {
@@ -71,11 +88,12 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
         Logger.Information(
             "Registered {Tools} MCP tool(s) across {Servers} server(s).",
             _tools.Count,
-            _clients.Count
+            servers.Count
         );
     }
 
-    private async Task ConnectServerAsync(McpServerConfig server)
+    /// <summary>Discovers a server's tools over a short-lived connection, then closes it.</summary>
+    private async Task DiscoverServerAsync(McpServerConfig server)
     {
         if (string.IsNullOrWhiteSpace(server.Name) || string.IsNullOrWhiteSpace(server.Url))
         {
@@ -83,23 +101,20 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
             return;
         }
 
-        var transport = new HttpClientTransport(
-            new HttpClientTransportOptions
-            {
-                Name = server.Name,
-                Endpoint = new Uri(server.Url),
-                AdditionalHeaders = server.Headers,
-            }
-        );
+        await using var client = await ConnectAsync(server, CancellationToken.None);
 
-        var mcpClient = await McpClient.CreateAsync(transport);
-        _clients.Add(mcpClient);
-
-        foreach (var tool in await mcpClient.ListToolsAsync())
+        foreach (var tool in await client.ListToolsAsync())
         {
             var functionName = MakeFunctionName(server.Name, tool.Name);
 
-            if (!_tools.TryAdd(functionName, new RegisteredTool(mcpClient, tool)))
+            var registered = new RegisteredTool(
+                server,
+                tool.Name,
+                tool.Description,
+                BinaryData.FromString(tool.JsonSchema.GetRawText())
+            );
+
+            if (!_tools.TryAdd(functionName, registered))
             {
                 Logger.Warning("Duplicate tool name {Function}; skipping.", functionName);
                 continue;
@@ -114,6 +129,42 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
         }
     }
 
+    /// <summary>
+    /// Marks a conversation as active. While at least one is active, execution connections
+    /// are kept open and shared. Balance every call with <see cref="EndConversation"/>.
+    /// </summary>
+    public void BeginConversation()
+    {
+        lock (_gate)
+        {
+            _activeConversations++;
+        }
+    }
+
+    /// <summary>
+    /// Marks a conversation as ended. When the last one ends, all open execution connections
+    /// are closed.
+    /// </summary>
+    public void EndConversation()
+    {
+        Task<McpClient>[]? toDispose = null;
+
+        lock (_gate)
+        {
+            if (_activeConversations > 0)
+                _activeConversations--;
+
+            if (_activeConversations == 0 && _connections.Count > 0)
+            {
+                toDispose = [.. _connections.Values];
+                _connections.Clear();
+            }
+        }
+
+        if (toDispose != null)
+            _ = DisposeAsync(toDispose);
+    }
+
     /// <summary>Builds the OpenAI function tool definitions for every registered MCP tool.</summary>
     public IEnumerable<RealtimeFunctionTool> GetRealtimeTools()
     {
@@ -121,13 +172,13 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
         {
             yield return new RealtimeFunctionTool(functionName)
             {
-                FunctionDescription = registered.Tool.Description,
-                FunctionParameters = BinaryData.FromString(registered.Tool.JsonSchema.GetRawText()),
+                FunctionDescription = registered.Description,
+                FunctionParameters = registered.Parameters,
             };
         }
     }
 
-    /// <summary>Invokes a previously registered MCP tool and returns its textual output.</summary>
+    /// <summary>Invokes a registered MCP tool and returns its textual output.</summary>
     public async Task<string> CallAsync(
         string functionName,
         string argumentsJson,
@@ -146,8 +197,10 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
             );
         }
 
-        var result = await registered.Client.CallToolAsync(
-            registered.Tool.Name,
+        var client = await GetConnectionAsync(registered.Server);
+
+        var result = await client.CallToolAsync(
+            registered.ToolName,
             arguments,
             cancellationToken: cancellationToken
         );
@@ -164,6 +217,71 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
             output = result.IsError == true ? "The tool reported an error." : "(no output)";
 
         return output;
+    }
+
+    /// <summary>Returns the shared connection for a server, opening it on first use.</summary>
+    private Task<McpClient> GetConnectionAsync(McpServerConfig server)
+    {
+        lock (_gate)
+        {
+            if (_connections.TryGetValue(server.Name, out var existing))
+                return existing;
+
+            // Not tied to a single conversation's token: the connection is shared.
+            var task = ConnectTrackedAsync(server);
+            _connections[server.Name] = task;
+            return task;
+        }
+    }
+
+    private async Task<McpClient> ConnectTrackedAsync(McpServerConfig server)
+    {
+        try
+        {
+            return await ConnectAsync(server, CancellationToken.None);
+        }
+        catch
+        {
+            // Don't leave a faulted connection cached; a later call should retry.
+            lock (_gate)
+            {
+                _connections.Remove(server.Name);
+            }
+            throw;
+        }
+    }
+
+    private static async Task<McpClient> ConnectAsync(
+        McpServerConfig server,
+        CancellationToken cancellationToken
+    )
+    {
+        var transport = new HttpClientTransport(
+            new HttpClientTransportOptions
+            {
+                Name = server.Name,
+                Endpoint = new Uri(server.Url),
+                AdditionalHeaders = server.Headers,
+            }
+        );
+
+        return await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+    }
+
+    private static async Task DisposeAsync(IEnumerable<Task<McpClient>> connections)
+    {
+        foreach (var connection in connections)
+        {
+            try
+            {
+                var client = await connection;
+                await client.DisposeAsync();
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+        }
     }
 
     private static string MakeFunctionName(string server, string tool)
