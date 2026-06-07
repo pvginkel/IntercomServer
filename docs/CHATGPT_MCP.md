@@ -9,9 +9,10 @@ and you can give that assistant extra abilities by plugging in **MCP servers**.
 - **Long‑press** the button on a device that is idle (not in a call, not ringing,
   not being dialed) → the device starts a ChatGPT voice conversation.
 - **Short‑press** that same device's button, or simply say *"goodbye"*, ends it.
-- A conversation is **exclusive**, exactly like a call: while one device is talking
-  to ChatGPT the rest of the system is busy, and you cannot start a call and a
-  conversation at the same time.
+- Conversations are **per device and concurrent**: several devices can talk to ChatGPT
+  at the same time, and other devices can still call each other. The only restriction is
+  that a device which is in a conversation is **not rung** by incoming calls until it
+  hangs up (the doorbell still sounds on it).
 
 Under the hood the server tells the device to stream its microphone (over UDP) to
 an audio endpoint the server exposes, bridges that audio to OpenAI, and streams the

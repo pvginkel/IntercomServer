@@ -13,7 +13,6 @@ internal class StateManager
     private readonly List<Device> _ringing = [];
     private IDisposable? _callingAlarm;
     private readonly List<Device> _inCall = [];
-    private Device? _chatting;
     private readonly DeviceManager _devices;
     private readonly AlarmManager _alarmManager;
     private readonly IMqttClient _client;
@@ -37,21 +36,19 @@ internal class StateManager
         _playbackManager = playbackManager;
         _conversation = conversation;
 
-        _conversation.SessionEnded += (_, device) =>
-        {
-            if (_chatting == device)
-                _chatting = null;
-        };
+        // When a conversation ends (hang-up, model goodbye, error, disconnect), reset the
+        // device that was chatting.
+        _conversation.SessionEnded += async (_, device) => await CleanupChat(device);
 
         _devices.DeviceRemoved += async (_, e) =>
         {
             _ringing.Remove(e.Device);
 
-            if (_chatting == e.Device)
+            if (_conversation.IsChatting(e.Device))
             {
                 try
                 {
-                    await _conversation.EndAsync();
+                    await _conversation.EndAsync(e.Device);
                 }
                 catch (Exception ex)
                 {
@@ -75,13 +72,14 @@ internal class StateManager
         _callingAlarm?.Dispose();
         _callingAlarm = null;
 
-        // A ChatGPT conversation is exclusive: while one is active the rest of the
-        // system is busy. Only a click from the device that is chatting (to hang up)
-        // is honoured; everything else is ignored.
-        if (_chatting != null)
+        // A device that is in a ChatGPT conversation uses its button only to control that
+        // conversation: a click hangs up. While chatting it is excluded from incoming
+        // calls (see RequestCall), but other devices are unaffected — they can still call
+        // each other and start their own conversations.
+        if (_conversation.IsChatting(device))
         {
-            if (action == DeviceAction.Click && _chatting == device)
-                await EndChat();
+            if (action == DeviceAction.Click)
+                await _conversation.EndAsync(device);
             return;
         }
 
@@ -114,27 +112,53 @@ internal class StateManager
 
     private async Task StartChat(Device device)
     {
-        Logger.Information("Device {Device} requested a ChatGPT conversation", device.DeviceId);
+        Logger.Information("Device {Device} started a ChatGPT conversation", device.DeviceId);
 
-        _chatting = device;
+        var started = false;
 
-        if (!await _conversation.StartAsync(device))
-            _chatting = null;
+        try
+        {
+            // Route the device's audio to/from the server, then start the conversation.
+            await device.AddEndpoint(_client, _conversation.AudioEndpoint);
+            await device.SetGreenLed(_client, Constants.LedOn);
+            await device.SetRecording(_client, true);
+
+            started = await _conversation.StartAsync(device);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to start ChatGPT conversation for device {Device}", device.DeviceId);
+        }
+
+        // On a failed start nothing will raise SessionEnded, so undo the device control
+        // here. On success, CleanupChat runs later via the SessionEnded handler.
+        if (!started)
+            await CleanupChat(device);
     }
 
-    private async Task EndChat()
+    private async Task CleanupChat(Device device)
     {
-        await _conversation.EndAsync();
-
-        _chatting = null;
+        try
+        {
+            await device.RemoveEndpoint(_client, _conversation.AudioEndpoint);
+            await device.SetRecording(_client, false);
+            await device.SetGreenLed(_client, Constants.LedOff);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to reset device {Device} after ChatGPT", device.DeviceId);
+        }
     }
 
     private async Task RequestCall(Device device)
     {
         Logger.Information("Device {Device} requested a call", device.DeviceId);
 
+        // A device that is in a ChatGPT conversation is busy and is not rung.
         _ringing.Clear();
-        _ringing.AddRange(_devices.GetAllEnabled().Where(p => p != device));
+        _ringing.AddRange(
+            _devices.GetAllEnabled().Where(p => p != device && !_conversation.IsChatting(p))
+        );
 
         if (_ringing.Count == 0)
         {
