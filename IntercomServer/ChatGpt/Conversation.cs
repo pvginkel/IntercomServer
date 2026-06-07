@@ -41,6 +41,7 @@ internal sealed class Conversation
         new(Constants.AudioFormat.SampleRate, OpenAiSampleRate);
     private readonly StreamingResampler _outResampler =
         new(OpenAiSampleRate, Constants.AudioFormat.SampleRate);
+    private readonly LiveAudioStream _audioOut = new();
 
     private readonly object _writerLock = new();
     private WaveFileWriter? _receivedWriter;
@@ -89,6 +90,11 @@ internal sealed class Conversation
 
         _audioServer.Data += OnAudioReceived;
 
+        // Pace the model's audio out to the device in real time. The device's jitter buffer
+        // is small and is overrun (garbled) if we forward OpenAI's faster-than-real-time
+        // stream as-is; AudioStreaming is the same pacing the ring/doorbell playback uses.
+        _ = RunAudioPump();
+
         // Only start consuming updates once setup succeeded, so a failed start never
         // raises the "ended" callback.
         _ = ReceiveLoop(session, _cts.Token);
@@ -116,6 +122,7 @@ internal sealed class Conversation
     private void Cleanup()
     {
         _audioServer.Data -= OnAudioReceived;
+        _audioOut.Complete();
 
         try
         {
@@ -220,7 +227,7 @@ internal sealed class Conversation
                         }
 
                         if (pcm16.Length > 0)
-                            _audioSender.Send(_deviceEndpoint, pcm16);
+                            _audioOut.Append(pcm16);
                         break;
 
                     case RealtimeServerUpdateResponseFunctionCallArgumentsDone functionCall:
@@ -229,7 +236,9 @@ internal sealed class Conversation
 
                     case RealtimeServerUpdateInputAudioBufferSpeechStarted:
                         // The user started speaking. Server VAD (interrupt_response) cancels
-                        // any in-flight model response automatically.
+                        // any in-flight model response; drop the audio we have buffered so the
+                        // assistant stops promptly instead of talking over the user.
+                        _audioOut.Discard();
                         break;
 
                     case RealtimeServerUpdateError error:
@@ -339,6 +348,28 @@ internal sealed class Conversation
         catch (Exception ex)
         {
             Logger.Debug(ex, "Failed to forward microphone audio to ChatGPT");
+        }
+    }
+
+    private async Task RunAudioPump()
+    {
+        try
+        {
+            await AudioStreaming.PlayAsync(
+                _audioSender,
+                [_deviceEndpoint],
+                _audioOut,
+                configuration: null,
+                _cts.Token
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            // Conversation is ending.
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "ChatGPT audio pump failed for device {Device}", Device.DeviceId);
         }
     }
 

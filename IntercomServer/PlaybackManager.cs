@@ -1,5 +1,4 @@
 ﻿using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Net;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
@@ -53,44 +52,17 @@ internal class PlaybackManager(AudioSender sender)
     {
         try
         {
-            var stopwatch = Stopwatch.StartNew();
-            var sent = TimeSpan.Zero;
-            var buffer = new byte[
-                (int)(Constants.AudioFormat.BytesPerSecond * Constants.AudioChunkSize.TotalSeconds)
-            ];
+            var endpoints = devices
+                .Select(device => IPEndPoint.Parse(device.Configuration!.Endpoint!))
+                .ToList();
 
-            stream.Position = 0;
-
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var read = stream.Read(buffer, 0, buffer.Length);
-
-                if (read == 0)
-                {
-                    if (configuration?.Loop != true)
-                        return;
-
-                    stream.Position = 0;
-                    continue;
-                }
-
-                foreach (var device in devices)
-                {
-                    sender.Send(
-                        IPEndPoint.Parse(device.Configuration!.Endpoint!),
-                        buffer.AsSpan(0, read)
-                    );
-                }
-
-                sent += TimeSpan.FromSeconds((double)read / Constants.AudioFormat.BytesPerSecond);
-
-                if (configuration?.Duration != null && sent > configuration.Duration.Value)
-                    return;
-
-                var delay = sent - stopwatch.Elapsed;
-                if (delay.Ticks > 0)
-                    await Task.Delay(delay, cancellationToken);
-            }
+            await AudioStreaming.PlayAsync(
+                sender,
+                endpoints,
+                stream,
+                configuration,
+                cancellationToken
+            );
         }
         catch (OperationCanceledException)
         {
