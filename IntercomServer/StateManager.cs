@@ -1,4 +1,5 @@
-﻿using IntercomServer.Utils;
+﻿using IntercomServer.ChatGpt;
+using IntercomServer.Utils;
 using MQTTnet;
 using Serilog;
 
@@ -12,10 +13,12 @@ internal class StateManager
     private readonly List<Device> _ringing = [];
     private IDisposable? _callingAlarm;
     private readonly List<Device> _inCall = [];
+    private Device? _chatting;
     private readonly DeviceManager _devices;
     private readonly AlarmManager _alarmManager;
     private readonly IMqttClient _client;
     private readonly PlaybackManager _playbackManager;
+    private readonly ConversationManager _conversation;
     private CancellationTokenSource? _ringingPlayback;
 
     public bool IsAutoAccept { get; set; }
@@ -24,17 +27,37 @@ internal class StateManager
         DeviceManager devices,
         AlarmManager alarmManager,
         IMqttClient client,
-        PlaybackManager playbackManager
+        PlaybackManager playbackManager,
+        ConversationManager conversation
     )
     {
         _devices = devices;
         _alarmManager = alarmManager;
         _client = client;
         _playbackManager = playbackManager;
+        _conversation = conversation;
+
+        _conversation.SessionEnded += (_, device) =>
+        {
+            if (_chatting == device)
+                _chatting = null;
+        };
 
         _devices.DeviceRemoved += async (_, e) =>
         {
             _ringing.Remove(e.Device);
+
+            if (_chatting == e.Device)
+            {
+                try
+                {
+                    await _conversation.EndAsync();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Failed to end ChatGPT conversation");
+                }
+            }
 
             try
             {
@@ -51,6 +74,16 @@ internal class StateManager
     {
         _callingAlarm?.Dispose();
         _callingAlarm = null;
+
+        // A ChatGPT conversation is exclusive: while one is active the rest of the
+        // system is busy. Only a click from the device that is chatting (to hang up)
+        // is honoured; everything else is ignored.
+        if (_chatting != null)
+        {
+            if (action == DeviceAction.Click && _chatting == device)
+                await EndChat();
+            return;
+        }
 
         switch (action)
         {
@@ -70,11 +103,30 @@ internal class StateManager
             case DeviceAction.LongClick:
                 if (_callingDevice != null)
                     await RejectCall();
+                else if (_inCall.Count == 0)
+                    await StartChat(device);
                 break;
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(action), action, null);
         }
+    }
+
+    private async Task StartChat(Device device)
+    {
+        Logger.Information("Device {Device} requested a ChatGPT conversation", device.DeviceId);
+
+        _chatting = device;
+
+        if (!await _conversation.StartAsync(device))
+            _chatting = null;
+    }
+
+    private async Task EndChat()
+    {
+        await _conversation.EndAsync();
+
+        _chatting = null;
     }
 
     private async Task RequestCall(Device device)

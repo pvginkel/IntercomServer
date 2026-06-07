@@ -4,3 +4,6 @@
 *.user
 *.suo
 launchSettings.json
+
+# Real MCP server configuration may contain API tokens in headers.
+mcpservers.json

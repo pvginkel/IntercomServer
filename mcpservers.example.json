@@ -1,0 +1,15 @@
+{
+  "servers": [
+    {
+      "name": "home",
+      "url": "http://homeassistant.local:8123/mcp/",
+      "headers": {
+        "Authorization": "Bearer REPLACE_WITH_TOKEN"
+      }
+    },
+    {
+      "name": "notes",
+      "url": "http://10.0.0.5:9000/mcp"
+    }
+  ]
+}
