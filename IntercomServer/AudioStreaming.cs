@@ -18,6 +18,11 @@ internal static class AudioStreaming
         CancellationToken cancellationToken
     )
     {
+        // Only treat the source as having idled (and resync the clock) when a read actually
+        // blocked for longer than this. Normal timer jitter on a buffered source stays well
+        // under it, so the pacing keeps self-correcting; a continuous ring tone never waits.
+        var idleThreshold = TimeSpan.FromMilliseconds(60);
+
         var stopwatch = Stopwatch.StartNew();
         var sent = TimeSpan.Zero;
         var buffer = new byte[
@@ -26,6 +31,7 @@ internal static class AudioStreaming
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            var beforeRead = stopwatch.Elapsed;
             var read = await stream.ReadAsync(buffer, cancellationToken);
 
             if (read == 0)
@@ -37,10 +43,11 @@ internal static class AudioStreaming
                 continue;
             }
 
-            // If the source idled (e.g. between ChatGPT turns) the wall clock ran ahead of
-            // what we have sent. Resync so we pace from now rather than bursting the backlog.
-            // For a continuous stream (a ring tone) this is a no-op.
-            if (sent < stopwatch.Elapsed)
+            // If reading blocked waiting for data, the source starved — a genuine idle gap
+            // (e.g. between ChatGPT turns). Resync to now so we resume real-time pacing
+            // rather than bursting to "catch up". This does NOT fire on ordinary Task.Delay
+            // overshoot, so continuous playback still self-corrects for timer jitter.
+            if (stopwatch.Elapsed - beforeRead > idleThreshold)
                 sent = stopwatch.Elapsed;
 
             foreach (var endpoint in endpoints)
