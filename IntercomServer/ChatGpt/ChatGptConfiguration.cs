@@ -25,19 +25,6 @@ internal class ChatGptConfiguration
         + "Keep your answers short and conversational, suitable for being spoken aloud. "
         + "When the user says goodbye or clearly wants to stop, call the end_conversation tool to hang up.";
 
-    /// <summary>
-    /// UDP port the server listens on for the device's microphone stream while a
-    /// ChatGPT conversation is active.
-    /// </summary>
-    public int AudioListenPort { get; init; } = 5004;
-
-    /// <summary>
-    /// IP address (or host) that devices should stream their microphone audio to.
-    /// This must be reachable by the devices. When empty, the first usable LAN
-    /// IPv4 address of this host is auto-detected.
-    /// </summary>
-    public string? AdvertisedHost { get; init; }
-
     /// <summary>Path to the JSON file describing the MCP servers to expose as tools.</summary>
     public string McpConfigFile { get; init; } = "mcpservers.json";
 

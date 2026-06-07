@@ -21,17 +21,8 @@ internal sealed class ConversationManager(
 
     private readonly ConcurrentDictionary<string, Conversation> _conversations = new();
 
-    private string? _audioEndpoint;
-
     /// <summary>Raised after a conversation has fully ended (from any cause).</summary>
     public event EventHandler<Device>? SessionEnded;
-
-    /// <summary>
-    /// The audio endpoint (host:port) that a device should stream its microphone to while
-    /// it is in a conversation. This is the address devices must be able to reach.
-    /// </summary>
-    public string AudioEndpoint =>
-        _audioEndpoint ??= $"{ResolveAdvertisedHost()}:{audioServer.LocalEndPoint.Port}";
 
     /// <summary>
     /// Starts a conversation with <paramref name="device"/>. Returns false when the
@@ -100,22 +91,5 @@ internal sealed class ConversationManager(
         _conversations.TryRemove(conversation.Device.DeviceId, out _);
 
         SessionEnded?.Invoke(this, conversation.Device);
-    }
-
-    private string ResolveAdvertisedHost()
-    {
-        if (!string.IsNullOrEmpty(configuration.AdvertisedHost))
-            return configuration.AdvertisedHost;
-
-        var address = NetworkUtils.GetNetworkIPAddresses().FirstOrDefault();
-        if (address == null)
-        {
-            throw new InvalidOperationException(
-                "Could not auto-detect a LAN IP address for the audio endpoint. "
-                    + "Set the CHATGPT_AUDIO_HOST environment variable."
-            );
-        }
-
-        return address.ToString();
     }
 }

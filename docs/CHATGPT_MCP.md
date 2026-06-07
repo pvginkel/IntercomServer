@@ -30,9 +30,14 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_MODEL` | no | `gpt-realtime` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
 | `CHATGPT_INSTRUCTIONS` | no | a built‑in persona | System prompt / persona for the assistant. |
-| `CHATGPT_AUDIO_PORT` | no | `5004` | UDP port the server listens on for the device microphone stream. |
-| `CHATGPT_AUDIO_HOST` | no | auto‑detected LAN IPv4 | The address devices stream their microphone to. **Must be reachable by the devices.** Set this explicitly when the server is multi‑homed or running behind NAT / a Kubernetes Service (e.g. a NodePort address). |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
+
+The server's UDP audio endpoint is a general (non‑ChatGPT) setting:
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `AUDIO_PORT` | no | `5004` | UDP port the server listens on for inbound device audio. |
+| `AUDIO_HOST` | no | auto‑detected LAN IPv4 | The address devices stream their audio to. **Must be reachable by the devices.** Behind NAT or a Kubernetes LoadBalancer set this to the external/LB IP — auto‑detection returns this host's own NIC address, which inside a Kubernetes pod is the (unreachable) pod IP. |
 
 ## Plugging in an MCP server
 

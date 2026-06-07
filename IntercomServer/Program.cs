@@ -36,13 +36,16 @@ var builder = new HostBuilder().ConfigureServices(
                 Instructions = Env("CHATGPT_INSTRUCTIONS") is { Length: > 0 } instructions
                     ? instructions
                     : new ChatGptConfiguration().Instructions,
-                AudioListenPort = string.IsNullOrEmpty(Env("CHATGPT_AUDIO_PORT"))
-                    ? 5004
-                    : int.Parse(Env("CHATGPT_AUDIO_PORT")!),
-                AdvertisedHost = Env("CHATGPT_AUDIO_HOST"),
                 McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                     ? mcpFile
                     : "mcpservers.json",
+            }
+        );
+        services.AddSingleton(
+            new AudioServerConfiguration
+            {
+                Port = string.IsNullOrEmpty(Env("AUDIO_PORT")) ? 5004 : int.Parse(Env("AUDIO_PORT")!),
+                Host = Env("AUDIO_HOST"),
             }
         );
         services.AddSingleton<Server>();
@@ -53,7 +56,7 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton<PlaybackManager>();
         services.AddSingleton<AudioSender>();
         services.AddSingleton(p => new UdpAudioServer(
-            p.GetRequiredService<ChatGptConfiguration>().AudioListenPort
+            p.GetRequiredService<AudioServerConfiguration>().Port
         ));
         services.AddSingleton<McpToolRegistry>();
         services.AddSingleton<ConversationManager>();
