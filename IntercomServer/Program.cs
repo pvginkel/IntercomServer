@@ -58,6 +58,7 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton(p => new UdpAudioServer(
             p.GetRequiredService<AudioServerConfiguration>().Port
         ));
+        services.AddSingleton<AudioEndpointResolver>();
         services.AddSingleton<McpToolRegistry>();
         services.AddSingleton<ConversationManager>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());

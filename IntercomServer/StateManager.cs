@@ -18,9 +18,7 @@ internal class StateManager
     private readonly IMqttClient _client;
     private readonly PlaybackManager _playbackManager;
     private readonly ConversationManager _conversation;
-    private readonly UdpAudioServer _audioServer;
-    private readonly AudioServerConfiguration _audioServerConfiguration;
-    private string? _audioEndpoint;
+    private readonly AudioEndpointResolver _audioEndpointResolver;
     private CancellationTokenSource? _ringingPlayback;
 
     public bool IsAutoAccept { get; set; }
@@ -31,8 +29,7 @@ internal class StateManager
         IMqttClient client,
         PlaybackManager playbackManager,
         ConversationManager conversation,
-        UdpAudioServer audioServer,
-        AudioServerConfiguration audioServerConfiguration
+        AudioEndpointResolver audioEndpointResolver
     )
     {
         _devices = devices;
@@ -40,8 +37,7 @@ internal class StateManager
         _client = client;
         _playbackManager = playbackManager;
         _conversation = conversation;
-        _audioServer = audioServer;
-        _audioServerConfiguration = audioServerConfiguration;
+        _audioEndpointResolver = audioEndpointResolver;
 
         // When a conversation ends (hang-up, model goodbye, error, disconnect), reset the
         // device that was chatting.
@@ -126,7 +122,7 @@ internal class StateManager
         try
         {
             // Route the device's audio to/from the server, then start the conversation.
-            await device.AddEndpoint(_client, AudioEndpoint);
+            await device.AddEndpoint(_client, _audioEndpointResolver.Endpoint);
             await device.SetGreenLed(_client, Constants.LedOn);
             await device.SetRecording(_client, true);
 
@@ -147,7 +143,7 @@ internal class StateManager
     {
         try
         {
-            await device.RemoveEndpoint(_client, AudioEndpoint);
+            await device.RemoveEndpoint(_client, _audioEndpointResolver.Endpoint);
             await device.SetRecording(_client, false);
             await device.SetGreenLed(_client, Constants.LedOff);
         }
@@ -155,29 +151,6 @@ internal class StateManager
         {
             Logger.Error(ex, "Failed to reset device {Device} after ChatGPT", device.DeviceId);
         }
-    }
-
-    // The audio endpoint (host:port) devices stream to while in a conversation. The host
-    // must be reachable by the devices, so behind NAT or a Kubernetes LoadBalancer it must
-    // be configured explicitly (AUDIO_HOST); auto-detection only works on a flat LAN.
-    private string AudioEndpoint =>
-        _audioEndpoint ??= $"{ResolveAudioHost()}:{_audioServer.LocalEndPoint.Port}";
-
-    private string ResolveAudioHost()
-    {
-        if (!string.IsNullOrEmpty(_audioServerConfiguration.Host))
-            return _audioServerConfiguration.Host;
-
-        var address = NetworkUtils.GetNetworkIPAddresses().FirstOrDefault();
-        if (address == null)
-        {
-            throw new InvalidOperationException(
-                "Could not auto-detect a LAN IP address for the audio endpoint. "
-                    + "Set the AUDIO_HOST environment variable."
-            );
-        }
-
-        return address.ToString();
     }
 
     private async Task RequestCall(Device device)
