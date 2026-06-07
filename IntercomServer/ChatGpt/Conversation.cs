@@ -26,6 +26,10 @@ internal sealed class Conversation
     private const string EndConversationTool = "end_conversation";
     private const int OpenAiSampleRate = 24000;
 
+    // Buffer this much of the model's audio before playback starts, to ride out OpenAI's
+    // bursty delivery without starving the device's jitter buffer at the start of a reply.
+    private const double PrerollSeconds = 0.15;
+
     private static readonly ILogger Logger = Log.ForContext<Conversation>();
 
     private readonly ChatGptConfiguration _configuration;
@@ -41,7 +45,8 @@ internal sealed class Conversation
         new(Constants.AudioFormat.SampleRate, OpenAiSampleRate);
     private readonly StreamingResampler _outResampler =
         new(OpenAiSampleRate, Constants.AudioFormat.SampleRate);
-    private readonly LiveAudioStream _audioOut = new();
+    private readonly LiveAudioStream _audioOut =
+        new((int)(Constants.AudioFormat.BytesPerSecond * PrerollSeconds));
 
     private readonly object _writerLock = new();
     private WaveFileWriter? _receivedWriter;
@@ -228,6 +233,12 @@ internal sealed class Conversation
 
                         if (pcm16.Length > 0)
                             _audioOut.Append(pcm16);
+                        break;
+
+                    case RealtimeServerUpdateResponseOutputAudioDone:
+                        // The model finished this reply's audio; release any sub-pre-roll
+                        // remainder so a short reply still plays out promptly.
+                        _audioOut.Release();
                         break;
 
                     case RealtimeServerUpdateResponseFunctionCallArgumentsDone functionCall:
