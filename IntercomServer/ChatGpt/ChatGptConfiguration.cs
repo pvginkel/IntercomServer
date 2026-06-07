@@ -28,5 +28,12 @@ internal class ChatGptConfiguration
     /// <summary>Path to the JSON file describing the MCP servers to expose as tools.</summary>
     public string McpConfigFile { get; init; } = "mcpservers.json";
 
+    /// <summary>
+    /// Debugging aid: when set, the audio received from OpenAI is also written to WAV files
+    /// in this directory — both the raw 24 kHz stream and the 16 kHz stream sent to the
+    /// device. Leave empty to disable.
+    /// </summary>
+    public string? DebugAudioDirectory { get; init; }
+
     public bool IsEnabled => !string.IsNullOrEmpty(ApiKey);
 }

@@ -31,6 +31,7 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
 | `CHATGPT_INSTRUCTIONS` | no | a built‑in persona | System prompt / persona for the assistant. |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
+| `CHATGPT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the 16 kHz stream sent to the device). |
 
 The server's UDP audio endpoint is a general (non‑ChatGPT) setting:
 

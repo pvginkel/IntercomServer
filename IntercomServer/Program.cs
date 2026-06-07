@@ -39,6 +39,7 @@ var builder = new HostBuilder().ConfigureServices(
                 McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                     ? mcpFile
                     : "mcpservers.json",
+                DebugAudioDirectory = Env("CHATGPT_DEBUG_AUDIO_DIR"),
             }
         );
         services.AddSingleton(

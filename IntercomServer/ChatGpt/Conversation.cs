@@ -5,6 +5,7 @@
 using System.Net;
 using IntercomServer.ChatGpt.Audio;
 using IntercomServer.Utils;
+using NAudio.Wave;
 using OpenAI.Realtime;
 using Serilog;
 
@@ -41,6 +42,10 @@ internal sealed class Conversation
     private readonly StreamingResampler _outResampler =
         new(OpenAiSampleRate, Constants.AudioFormat.SampleRate);
 
+    private readonly object _writerLock = new();
+    private WaveFileWriter? _receivedWriter;
+    private WaveFileWriter? _sentWriter;
+
     private RealtimeSessionClient? _session;
     private int _ending;
 
@@ -73,8 +78,10 @@ internal sealed class Conversation
         );
         _session = session;
 
-        await SendGuardedAsync(() =>
-            session.ConfigureConversationSessionAsync(BuildSessionOptions(), _cts.Token)
+        CreateDebugWriters();
+
+        await SendGuardedAsync(
+            () => session.ConfigureConversationSessionAsync(BuildSessionOptions(), _cts.Token)
         );
 
         // Greet first so the device user hears something immediately.
@@ -129,9 +136,69 @@ internal sealed class Conversation
         }
 
         _cts.Dispose();
+
+        lock (_writerLock)
+        {
+            try
+            {
+                _receivedWriter?.Dispose();
+                _sentWriter?.Dispose();
+            }
+            catch
+            {
+                // Ignore.
+            }
+            finally
+            {
+                _receivedWriter = null;
+                _sentWriter = null;
+            }
+        }
     }
 
-    private async Task ReceiveLoop(RealtimeSessionClient session, CancellationToken cancellationToken)
+    private void CreateDebugWriters()
+    {
+        var directory = _configuration.DebugAudioDirectory;
+        if (string.IsNullOrEmpty(directory))
+            return;
+
+        try
+        {
+            Directory.CreateDirectory(directory);
+
+            var stamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            var deviceId = string.Concat(
+                Device.DeviceId.Select(c => char.IsLetterOrDigit(c) ? c : '_')
+            );
+
+            _receivedWriter = new WaveFileWriter(
+                Path.Combine(directory, $"{stamp}_{deviceId}_received_{OpenAiSampleRate}.wav"),
+                new WaveFormat(OpenAiSampleRate, 16, 1)
+            );
+            _sentWriter = new WaveFileWriter(
+                Path.Combine(
+                    directory,
+                    $"{stamp}_{deviceId}_sent_{Constants.AudioFormat.SampleRate}.wav"
+                ),
+                new WaveFormat(Constants.AudioFormat.SampleRate, 16, 1)
+            );
+
+            Logger.Information(
+                "Recording ChatGPT audio for device {Device} to {Directory}",
+                Device.DeviceId,
+                directory
+            );
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Could not start ChatGPT debug audio recording");
+        }
+    }
+
+    private async Task ReceiveLoop(
+        RealtimeSessionClient session,
+        CancellationToken cancellationToken
+    )
     {
         try
         {
@@ -140,7 +207,18 @@ internal sealed class Conversation
                 switch (update)
                 {
                     case RealtimeServerUpdateResponseOutputAudioDelta audio:
-                        var pcm16 = _outResampler.Resample(audio.Delta.ToArray());
+                        var received = audio.Delta.ToArray();
+                        var pcm16 = _outResampler.Resample(received);
+
+                        // Debug capture: the raw audio received from OpenAI and the
+                        // resampled audio we send to the device.
+                        lock (_writerLock)
+                        {
+                            _receivedWriter?.Write(received, 0, received.Length);
+                            if (pcm16.Length > 0)
+                                _sentWriter?.Write(pcm16, 0, pcm16.Length);
+                        }
+
                         if (pcm16.Length > 0)
                             _audioSender.Send(_deviceEndpoint, pcm16);
                         break;
@@ -190,12 +268,16 @@ internal sealed class Conversation
 
         if (name == EndConversationTool)
         {
-            Logger.Information("Model requested to end the conversation with {Device}.", Device.DeviceId);
-            await SendGuardedAsync(() =>
-                session.AddItemAsync(
-                    new RealtimeFunctionCallOutputItem(functionCall.CallId, "Goodbye."),
-                    cancellationToken
-                )
+            Logger.Information(
+                "Model requested to end the conversation with {Device}.",
+                Device.DeviceId
+            );
+            await SendGuardedAsync(
+                () =>
+                    session.AddItemAsync(
+                        new RealtimeFunctionCallOutputItem(functionCall.CallId, "Goodbye."),
+                        cancellationToken
+                    )
             );
             End();
             return;
@@ -215,11 +297,12 @@ internal sealed class Conversation
             output = $"The tool failed: {ex.Message}";
         }
 
-        await SendGuardedAsync(() =>
-            session.AddItemAsync(
-                new RealtimeFunctionCallOutputItem(functionCall.CallId, output),
-                cancellationToken
-            )
+        await SendGuardedAsync(
+            () =>
+                session.AddItemAsync(
+                    new RealtimeFunctionCallOutputItem(functionCall.CallId, output),
+                    cancellationToken
+                )
         );
         await SendGuardedAsync(() => session.StartResponseAsync(cancellationToken));
     }
@@ -241,8 +324,8 @@ internal sealed class Conversation
             if (pcm24.Length == 0)
                 return;
 
-            await SendGuardedAsync(() =>
-                session.SendInputAudioAsync(BinaryData.FromBytes(pcm24), _cts.Token)
+            await SendGuardedAsync(
+                () => session.SendInputAudioAsync(BinaryData.FromBytes(pcm24), _cts.Token)
             );
         }
         catch (OperationCanceledException)
