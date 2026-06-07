@@ -1,5 +1,6 @@
 ﻿using IntercomServer;
 using IntercomServer.ChatGpt;
+using IntercomServer.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MQTTnet;
@@ -51,6 +52,9 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton<AlarmManager>();
         services.AddSingleton<PlaybackManager>();
         services.AddSingleton<AudioSender>();
+        services.AddSingleton(p => new UdpAudioServer(
+            p.GetRequiredService<ChatGptConfiguration>().AudioListenPort
+        ));
         services.AddSingleton<McpToolRegistry>();
         services.AddSingleton<ConversationManager>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());

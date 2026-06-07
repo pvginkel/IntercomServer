@@ -22,7 +22,7 @@ internal partial class IntercomClientControl
     private static readonly ILogger Logger = Log.ForContext<IntercomClientControl>();
 
     public IntercomClient IntercomClient { get; }
-    public IntercomUDPServer IntercomUDPServer { get; }
+    public UdpAudioServer IntercomUDPServer { get; }
     public Device Device { get; }
 
     public event EventHandler? RemoveClicked;
@@ -36,7 +36,7 @@ internal partial class IntercomClientControl
 
         IsEnabled = false;
 
-        IntercomUDPServer = new IntercomUDPServer(0);
+        IntercomUDPServer = new UdpAudioServer(0);
         Device = new Device(
             clientConfiguration.DeviceId,
             new IPEndPoint(
@@ -304,7 +304,7 @@ internal partial class IntercomClientControl
         }
     }
 
-    private void IntercomUDPServer_Data(object? sender, IntercomUDPDataEventArgs e)
+    private void IntercomUDPServer_Data(object? sender, UdpAudioDataEventArgs e)
     {
         Device.AppendAudio(e.RemoteEndpoint, e.Data);
     }

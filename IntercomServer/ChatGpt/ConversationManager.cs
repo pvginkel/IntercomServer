@@ -27,6 +27,7 @@ internal sealed class ConversationManager(
     ChatGptConfiguration configuration,
     McpToolRegistry mcp,
     AudioSender audioSender,
+    UdpAudioServer audioServer,
     IMqttClient client
 )
 {
@@ -36,8 +37,6 @@ internal sealed class ConversationManager(
 
     private readonly object _gate = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
-
-    private AudioReceiver? _audioReceiver;
 
     private Device? _device;
     private IPEndPoint? _deviceEndpoint;
@@ -91,8 +90,7 @@ internal sealed class ConversationManager(
 
         try
         {
-            _audioReceiver ??= new AudioReceiver(configuration.AudioListenPort);
-            _advertisedEndpoint = $"{ResolveAdvertisedHost()}:{_audioReceiver.Port}";
+            _advertisedEndpoint = $"{ResolveAdvertisedHost()}:{audioServer.LocalEndPoint.Port}";
 
             Logger.Information(
                 "Starting ChatGPT conversation with device {Device}; mic stream -> {Endpoint}",
@@ -117,7 +115,7 @@ internal sealed class ConversationManager(
             // Greet first so the device user hears something immediately.
             await SendGuardedAsync(() => session.StartResponseAsync(_cts.Token));
 
-            _audioReceiver.AudioReceived += OnAudioReceived;
+            audioServer.Data += OnAudioReceived;
 
             await device.AddEndpoint(client, _advertisedEndpoint);
             await device.SetGreenLed(client, Constants.LedOn);
@@ -160,8 +158,7 @@ internal sealed class ConversationManager(
             _outResampler = null;
         }
 
-        if (_audioReceiver != null)
-            _audioReceiver.AudioReceived -= OnAudioReceived;
+        audioServer.Data -= OnAudioReceived;
 
         try
         {
@@ -304,18 +301,30 @@ internal sealed class ConversationManager(
         await SendGuardedAsync(() => session.StartResponseAsync(cancellationToken));
     }
 
-    private async void OnAudioReceived(object? sender, AudioReceivedEventArgs e)
+    private async void OnAudioReceived(object? sender, UdpAudioDataEventArgs e)
     {
         var session = _session;
         var resampler = _micResampler;
         var cts = _cts;
+        var deviceEndpoint = _deviceEndpoint;
 
-        if (session == null || resampler == null || cts == null || _ending == 1)
+        if (
+            session == null
+            || resampler == null
+            || cts == null
+            || deviceEndpoint == null
+            || _ending == 1
+        )
+            return;
+
+        // Identify the chatting device's microphone stream by its source endpoint.
+        if (!e.RemoteEndpoint.Equals(deviceEndpoint) || e.Data.Length <= 4)
             return;
 
         try
         {
-            var pcm24 = resampler.Resample(e.Pcm.Span);
+            // Strip the 4-byte sequence header (see AudioSender) before resampling.
+            var pcm24 = resampler.Resample(e.Data.AsSpan(4));
             if (pcm24.Length == 0)
                 return;
 

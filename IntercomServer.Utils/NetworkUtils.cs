@@ -2,9 +2,9 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
-namespace IntercomServer;
+namespace IntercomServer.Utils;
 
-internal static class NetworkUtils
+public static class NetworkUtils
 {
     /// <summary>
     /// Returns the usable IPv4 addresses of this host, ignoring loopback,

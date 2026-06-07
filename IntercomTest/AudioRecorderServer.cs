@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using IntercomServer.Utils;
 using NAudio.Wave;
 using Serilog;
 
@@ -8,7 +9,7 @@ internal class AudioRecorderServer : IDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<AudioRecorderServer>();
 
-    private readonly IntercomUDPServer _udpServer = new(5139);
+    private readonly UdpAudioServer _udpServer = new(5139);
     private readonly Lock _syncRoot = new();
     private WaveFileWriter? _writer;
     private readonly Timer _stopTimer;
@@ -31,7 +32,7 @@ internal class AudioRecorderServer : IDisposable
         Logger.Information("Stopped dumping audio data");
     }
 
-    private void _udpServer_Data(object? sender, IntercomUDPDataEventArgs e)
+    private void _udpServer_Data(object? sender, UdpAudioDataEventArgs e)
     {
         lock (_syncRoot)
         {

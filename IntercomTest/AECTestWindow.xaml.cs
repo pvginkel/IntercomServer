@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using IntercomServer.Utils;
 using IntercomTest.SoundRendering;
 using MQTTnet;
 using NAudio.Wave;
@@ -26,7 +27,7 @@ internal partial class AECTestWindow
     private const string SampleFileName = "AEC Sample.wav";
 
     private readonly IMqttClient _client;
-    private readonly IntercomUDPServer _udpServer = new(5140);
+    private readonly UdpAudioServer _udpServer = new(5140);
     private WriteableBitmap? _bitmap;
     private ISoundRenderer? _renderer;
     private DeviceRef? _listeningDevice;
@@ -104,7 +105,7 @@ internal partial class AECTestWindow
         }
     }
 
-    private void _udpServer_Data(object? sender, IntercomUDPDataEventArgs e)
+    private void _udpServer_Data(object? sender, UdpAudioDataEventArgs e)
     {
         var index = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(e.Data));
 
