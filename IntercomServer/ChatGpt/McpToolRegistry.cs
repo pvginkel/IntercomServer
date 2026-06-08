@@ -261,11 +261,28 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
             {
                 Name = server.Name,
                 Endpoint = new Uri(server.Url),
-                AdditionalHeaders = server.Headers,
+                AdditionalHeaders = ResolveHeaders(server.Name),
             }
         );
 
         return await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves the HTTP headers for a server from the environment. Auth is not stored in the
+    /// config file: for a server named <c>foo-bar</c> the app reads <c>MCP_TOKEN_FOO_BAR</c>
+    /// (name uppercased, <c>-</c> → <c>_</c>) and, when set, sends its value verbatim — scheme
+    /// included, e.g. <c>Bearer abc…</c> — as the <c>Authorization</c> header. When the variable
+    /// is unset the server is left unauthenticated.
+    /// </summary>
+    private static Dictionary<string, string>? ResolveHeaders(string serverName)
+    {
+        var envName = "MCP_TOKEN_" + serverName.ToUpperInvariant().Replace('-', '_');
+        var token = Environment.GetEnvironmentVariable(envName);
+
+        return string.IsNullOrEmpty(token)
+            ? null
+            : new Dictionary<string, string> { ["Authorization"] = token };
     }
 
     private static async Task DisposeAsync(IEnumerable<Task<McpClient>> connections)
@@ -305,5 +322,4 @@ internal sealed class McpServerConfig
 {
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
-    public Dictionary<string, string>? Headers { get; set; }
 }

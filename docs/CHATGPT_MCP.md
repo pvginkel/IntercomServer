@@ -70,8 +70,7 @@ Adding an MCP server is a **config change only — no code**:
      "servers": [
        {
          "name": "home",
-         "url": "http://homeassistant.local:8123/mcp/",
-         "headers": { "Authorization": "Bearer REPLACE_WITH_TOKEN" }
+         "url": "http://homeassistant.local:8123/mcp/"
        },
        {
          "name": "notes",
@@ -83,9 +82,17 @@ Adding an MCP server is a **config change only — no code**:
 
    | Field | Required | Meaning |
    | --- | --- | --- |
-   | `name` | yes | A short label, unique per server. Used to namespace its tools. |
+   | `name` | yes | A short label, unique per server. Used to namespace its tools **and** as the join key to its auth token (see below). |
    | `url` | yes | The MCP server's HTTP endpoint (Streamable HTTP or SSE — auto‑detected). |
-   | `headers` | no | Extra HTTP headers sent on every request, e.g. an `Authorization` bearer token. |
+
+   **Authentication is supplied from the environment, not this file.** For each server,
+   the app looks up an environment variable named `MCP_TOKEN_<NAME>`, where `<NAME>` is the
+   server's `name` uppercased with `-` turned into `_` (so `trello` → `MCP_TOKEN_TRELLO`,
+   `home-assistant` → `MCP_TOKEN_HOME_ASSISTANT`). When that variable is set, its value is sent
+   **verbatim** as the `Authorization` header on every request; when it is unset, the server is
+   left unauthenticated. The value is the *full* header including the scheme — e.g.
+   `Bearer abc…` or `Basic abc…` — so the scheme lives in the secret store, not in code. Because
+   `name` is the join key, keep server names stable.
 
 2. Restart the server. On startup the log shows what was discovered:
 
@@ -107,8 +114,9 @@ Adding an MCP server is a **config change only — no code**:
   them over HTTP if you need them.)
 - **Approvals:** tool calls run automatically (no approval prompt) — appropriate
   for tools you already trust and run yourself.
-- **Secrets:** `mcpservers.json` may contain tokens, so it is git‑ignored. Commit
-  `mcpservers.example.json` instead.
+- **Secrets:** `mcpservers.json` holds no credentials — tokens come from the
+  `MCP_TOKEN_<NAME>` environment variables instead. The file is still git‑ignored as
+  deployment‑specific config; commit `mcpservers.example.json` instead.
 - A built‑in `end_conversation` tool is always available to the model so it can
   hang up when you say goodbye.
 - A built‑in `web_search` tool is always available: when the model calls it, the server
