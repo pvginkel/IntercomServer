@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Claude",
+      "type": "shell",
+      "command": "claudebox",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "icon": { "id": "sparkle" },
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "new",
+        "reveal": "always",
+        "focus": true,
+        "showReuseMessage": false,
+        "close": true
+      },
+      "runOptions": {
+        "reevaluateOnRerun": true,
+        "instanceLimit": 999
+      },
+      "isBackground": true
+    }
+  ]
+}

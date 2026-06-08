@@ -1,0 +1,21 @@
+services:
+  llmbox:
+    image: registry:5000/llmbox:latest
+    network_mode: host
+    pid: host
+    working_dir: /work/IntercomServer
+    tty: true
+    user: "${UID}:${GID}"
+    environment:
+      TERM: "${TERM}"
+      COLORTERM: "${COLORTERM}"
+      HA_URL: "${HA_URL}"
+      HA_TOKEN: "${HA_TOKEN}"
+    volumes:
+      - ${HOME}/.claude.json:/home/ubuntu/.claude.json:rw
+      - ${HOME}/.claude:/home/ubuntu/.claude:rw
+      - ${HOME}/.codex:/home/ubuntu/.codex:rw
+      - ${HOME}/.vimrc:/home/ubuntu/.vimrc:ro
+      - ${HOME}/.gitconfig:/home/ubuntu/.gitconfig:ro
+      - ${HOME}/.cache:/home/ubuntu/.cache:rw
+      - .:/work/IntercomServer:rw

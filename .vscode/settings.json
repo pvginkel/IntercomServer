@@ -1,0 +1,25 @@
+{
+  "editor.formatOnSave": false,
+  "[python]": {
+    "editor.formatOnSave": false
+  },
+  "python.REPL.enableREPLSmartSend": false,
+  "files.exclude": {
+    "backend": true,
+    "frontend": true,
+    "portal": true,
+    ".pnpm-store": true,
+    ".*_cache": true,
+    ".site-stage": true,
+    "**/node_modules": true,
+    "**/__pycache__": true,
+    "**/*.tsbuildinfo": true,
+  },
+  "search.exclude": {
+    "**/*.meta.json": true
+  },
+  "python.analysis.include": [
+    "scripts",
+    "tools"
+  ]
+}
