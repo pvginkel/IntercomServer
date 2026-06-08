@@ -14,8 +14,8 @@ namespace IntercomServer.ChatGpt;
 /// <c>list_memories</c> and the <c>{MEMORIES}</c> prompt placeholder.
 ///
 /// Exposes four function tools: <c>list_memories</c>, <c>get_memory</c>, <c>put_memory</c>
-/// and <c>delete_memory</c>. Get/put/delete are by slug. Enabled only when a memory folder
-/// is configured.
+/// and <c>delete_memory</c>. Get/put/delete are by slug. The memories live in a
+/// <c>memories/</c> sub-folder of the configured data directory.
 /// </summary>
 internal sealed class MemoryStore(ChatGptConfiguration configuration)
 {
@@ -29,16 +29,14 @@ internal sealed class MemoryStore(ChatGptConfiguration configuration)
     private static readonly JsonSerializerOptions JsonOptions =
         new() { PropertyNameCaseInsensitive = true };
 
-    public bool IsEnabled => !string.IsNullOrEmpty(configuration.MemoryDirectory);
+    /// <summary>Folder holding the memory files: a <c>memories/</c> sub-folder of the data directory.</summary>
+    private string MemoryDirectory => Path.Combine(configuration.DataDirectory, "memories");
 
     public bool Handles(string toolName) =>
         toolName is ListTool or GetTool or PutTool or DeleteTool;
 
     public IEnumerable<RealtimeFunctionTool> GetRealtimeTools()
     {
-        if (!IsEnabled)
-            yield break;
-
         yield return Tool(
             ListTool,
             "List all stored memories. Returns a Markdown list of '[summary](slug)'.",
@@ -78,9 +76,6 @@ internal sealed class MemoryStore(ChatGptConfiguration configuration)
         CancellationToken cancellationToken
     )
     {
-        if (!IsEnabled)
-            return "Memory is not configured.";
-
         var args = ParseArguments(argumentsJson);
 
         return toolName switch
@@ -96,13 +91,11 @@ internal sealed class MemoryStore(ChatGptConfiguration configuration)
     /// <summary>Renders the memory list used for the <c>{MEMORIES}</c> prompt placeholder.</summary>
     public string RenderMemoriesList()
     {
-        if (!IsEnabled || !Directory.Exists(configuration.MemoryDirectory))
+        if (!Directory.Exists(MemoryDirectory))
             return "";
 
         var lines = new List<string>();
-        foreach (
-            var file in Directory.EnumerateFiles(configuration.MemoryDirectory!, "*.md").OrderBy(f => f)
-        )
+        foreach (var file in Directory.EnumerateFiles(MemoryDirectory, "*.md").OrderBy(f => f))
         {
             string? firstLine;
             try
@@ -152,7 +145,7 @@ internal sealed class MemoryStore(ChatGptConfiguration configuration)
         if (TitleOf(FirstLine(content)).Length == 0)
             return "The first line of the memory must be a title.";
 
-        Directory.CreateDirectory(configuration.MemoryDirectory!);
+        Directory.CreateDirectory(MemoryDirectory);
         await File.WriteAllTextAsync(path, content, cancellationToken);
 
         Logger.Information("Saved memory {Slug}", slug);
@@ -201,7 +194,7 @@ internal sealed class MemoryStore(ChatGptConfiguration configuration)
             return false;
         }
 
-        path = Path.Combine(configuration.MemoryDirectory!, slug);
+        path = Path.Combine(MemoryDirectory, slug);
         return true;
     }
 

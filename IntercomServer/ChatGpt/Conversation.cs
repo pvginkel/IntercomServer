@@ -39,7 +39,7 @@ internal sealed class Conversation
     private readonly MemoryStore _memory;
     private readonly AudioSender _audioSender;
     private readonly UdpAudioServer _audioServer;
-    private readonly Action<Conversation> _onEnded;
+    private readonly Action<Conversation> _onClosing;
 
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
@@ -56,7 +56,31 @@ internal sealed class Conversation
     private WaveFileWriter? _sentWriter;
 
     private RealtimeSessionClient? _session;
-    private int _ending;
+
+    // Lifecycle: Active while bridging audio, Closing during the final memory-flush turn,
+    // Disposed once torn down. Guarded by _stateLock.
+    private enum State
+    {
+        Active,
+        Closing,
+        Disposed,
+    }
+
+    private readonly object _stateLock = new();
+    private State _state = State.Active;
+    private int _closingRaised;
+
+    // Set once the receive loop has stopped, so a hand-off close knows the session is already
+    // gone and there is nothing left to flush through.
+    private volatile bool _receiveLoopEnded;
+
+    // Memory-flush bookkeeping. _flushing is set while the closing turn runs; _flushResponseIds
+    // collects the responses created during it (touched only from the receive loop) so we can
+    // tell its completion apart from a reply we cancelled on the way in.
+    private volatile bool _flushing;
+    private readonly HashSet<string> _flushResponseIds = new();
+    private readonly TaskCompletionSource _flushCompleted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Device Device { get; }
 
@@ -68,7 +92,7 @@ internal sealed class Conversation
         MemoryStore memory,
         AudioSender audioSender,
         UdpAudioServer audioServer,
-        Action<Conversation> onEnded
+        Action<Conversation> onClosing
     )
     {
         Device = device;
@@ -78,7 +102,7 @@ internal sealed class Conversation
         _memory = memory;
         _audioSender = audioSender;
         _audioServer = audioServer;
-        _onEnded = onEnded;
+        _onClosing = onClosing;
         _deviceEndpoint = IPEndPoint.Parse(device.Configuration!.Endpoint!);
     }
 
@@ -112,27 +136,121 @@ internal sealed class Conversation
         _ = ReceiveLoop(session, _cts.Token);
     }
 
-    /// <summary>Tears down the conversation without notifying (used for a failed start).</summary>
-    public void Dispose()
+    /// <summary>Tears down the conversation without handing it off (used for a failed start).</summary>
+    public void Dispose() => DisposeResources();
+
+    /// <summary>
+    /// Requests a graceful end of the conversation (idempotent). The live audio bridge stops and
+    /// the conversation is handed off (via the closing callback) so the model can be given one
+    /// final, audio-free turn to persist memory before the session is disposed.
+    /// </summary>
+    public void End() => RaiseClosing();
+
+    // Raised exactly once, by whichever happens first: the user hanging up, the model ending the
+    // conversation, or the receive loop stopping. Stops audio and hands the conversation off.
+    private void RaiseClosing()
     {
-        if (Interlocked.Exchange(ref _ending, 1) == 1)
+        if (Interlocked.Exchange(ref _closingRaised, 1) != 0)
             return;
 
-        Cleanup();
+        // Stop bridging audio right away; the closing turn is text-only and the owner is about
+        // to free the device.
+        StopAudio();
+        _onClosing(this);
     }
 
-    /// <summary>Ends the conversation (idempotent) and notifies via the ended callback.</summary>
-    public void End()
+    private void StopAudio()
     {
-        if (Interlocked.Exchange(ref _ending, 1) == 1)
+        _audioServer.Data -= OnAudioReceived;
+
+        // Drop whatever is still buffered so playback stops abruptly (as on barge-in) instead of
+        // draining out to the device after it has been reset, then end the stream.
+        _audioOut.Discard();
+        _audioOut.Complete();
+    }
+
+    /// <summary>
+    /// Gives the model one last audio-free turn to persist memory with its memory tools, returning
+    /// once that turn completes (or is cancelled). A no-op when the session is already gone (e.g.
+    /// the socket dropped). Called by <see cref="ConversationCloser"/> after the device is freed.
+    /// </summary>
+    public async Task FlushMemoryAsync(CancellationToken cancellationToken)
+    {
+        var session = _session;
+        if (session == null || _receiveLoopEnded)
             return;
 
-        Cleanup();
-        _onEnded(this);
+        lock (_stateLock)
+        {
+            if (_state != State.Active)
+                return;
+            _state = State.Closing;
+        }
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _cts.Token
+        );
+        var token = linked.Token;
+
+        _flushing = true;
+
+        // Cancel a half-finished reply (if any) so we can run our own closing turn, then ask the
+        // model to update memory using only the memory tools — no audio, and no MCP, whose
+        // connections are released the moment the conversation is handed over.
+        await TryCancelResponseAsync(session, token);
+
+        await SendGuardedAsync(
+            () =>
+                session.AddItemAsync(
+                    RealtimeItem.CreateSystemMessageItem(_configuration.MemoryFlushPrompt),
+                    token
+                )
+        );
+        await SendGuardedAsync(() => session.StartResponseAsync(BuildMemoryFlushOptions(), token));
+
+        await _flushCompleted.Task.WaitAsync(token);
     }
 
-    private void Cleanup()
+    private async Task TryCancelResponseAsync(
+        RealtimeSessionClient session,
+        CancellationToken token
+    )
     {
+        try
+        {
+            await SendGuardedAsync(() => session.CancelResponseAsync(token));
+        }
+        catch (Exception ex)
+        {
+            // Usually there is simply no active response to cancel; that is fine.
+            Logger.Debug(
+                ex,
+                "No in-flight response to cancel while closing {Device}",
+                Device.DeviceId
+            );
+        }
+    }
+
+    // The closing turn is text-only (no spoken reply) and may use only the memory tools.
+    private RealtimeResponseOptions BuildMemoryFlushOptions()
+    {
+        var options = new RealtimeResponseOptions();
+        options.OutputModalities.Add(RealtimeOutputModality.Text);
+        foreach (var tool in _memory.GetRealtimeTools())
+            options.Tools.Add(tool);
+        return options;
+    }
+
+    private void DisposeResources()
+    {
+        lock (_stateLock)
+        {
+            if (_state == State.Disposed)
+                return;
+            _state = State.Disposed;
+        }
+
         _audioServer.Data -= OnAudioReceived;
         _audioOut.Complete();
 
@@ -252,6 +370,25 @@ internal sealed class Conversation
                         await HandleFunctionCall(session, functionCall, cancellationToken);
                         break;
 
+                    case RealtimeServerUpdateResponseCreated created
+                        when _flushing && created.Response?.Id is { Length: > 0 } createdId:
+                        // Track the responses belonging to the closing turn so we can recognise
+                        // its completion (and ignore a reply we cancelled on the way in).
+                        _flushResponseIds.Add(createdId);
+                        break;
+
+                    case RealtimeServerUpdateResponseDone done
+                        when _flushing
+                            && done.Response?.Id is { Length: > 0 } doneId
+                            && _flushResponseIds.Contains(doneId)
+                            && !done.Response.OutputItems.Any(item =>
+                                item is RealtimeFunctionCallItem
+                            ):
+                        // A closing-turn response finished without making another tool call:
+                        // memory is persisted, so the flush is done.
+                        _flushCompleted.TrySetResult();
+                        break;
+
                     case RealtimeServerUpdateInputAudioBufferSpeechStarted:
                         // The user started speaking. Server VAD (interrupt_response) cancels
                         // any in-flight model response; drop the audio we have buffered so the
@@ -279,10 +416,22 @@ internal sealed class Conversation
         }
         finally
         {
-            // The socket closed (server hang-up, network error, or our own teardown);
-            // make sure the device is reset. End is idempotent.
-            End();
+            OnReceiveLoopEnded();
         }
+    }
+
+    private void OnReceiveLoopEnded()
+    {
+        _receiveLoopEnded = true;
+
+        // Unblock a closing turn that will never complete now the stream has stopped.
+        _flushCompleted.TrySetResult();
+
+        // The update stream stopped: server hang-up, network error, or our own teardown after a
+        // graceful close. Make sure the conversation is handed off so the device is freed
+        // (idempotent — a no-op when a graceful close already did it), then dispose.
+        RaiseClosing();
+        DisposeResources();
     }
 
     private async Task HandleFunctionCall(
@@ -336,13 +485,21 @@ internal sealed class Conversation
                     cancellationToken
                 )
         );
-        await SendGuardedAsync(() => session.StartResponseAsync(cancellationToken));
+
+        // Continue the turn. During the closing memory flush, keep continuations text-only and
+        // limited to the memory tools (BuildMemoryFlushOptions) instead of the spoken default.
+        await SendGuardedAsync(
+            () =>
+                _flushing
+                    ? session.StartResponseAsync(BuildMemoryFlushOptions(), cancellationToken)
+                    : session.StartResponseAsync(cancellationToken)
+        );
     }
 
     private async void OnAudioReceived(object? sender, UdpAudioDataEventArgs e)
     {
         var session = _session;
-        if (session == null || _ending == 1)
+        if (session == null || _state != State.Active)
             return;
 
         // Identify this device's microphone stream by its source endpoint, and strip the

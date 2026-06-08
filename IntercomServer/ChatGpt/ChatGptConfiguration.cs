@@ -34,14 +34,25 @@ internal class ChatGptConfiguration
         + "Keep your answers short and conversational, suitable for being spoken aloud. "
         + "When the user says goodbye or clearly wants to stop, call the end_conversation tool to hang up.";
 
+    /// <summary>
+    /// Instruction handed to the model on the final, audio-free turn when a conversation ends, so
+    /// it can persist anything worth remembering using its memory tools before hang-up.
+    /// </summary>
+    public string MemoryFlushPrompt { get; init; } =
+        "The conversation has ended. Silently review what was said and, using your memory tools, "
+        + "save or update anything worth remembering for next time. Focus specifically on "
+        + "preferences and corrections the user stated, and store information that will answer the "
+        + "users question faster next time. Produce no spoken reply.";
+
     /// <summary>Path to the JSON file describing the MCP servers to expose as tools.</summary>
     public string McpConfigFile { get; init; } = "mcpservers.json";
 
     /// <summary>
-    /// Folder where conversation memories are stored as flat <c>.md</c> files (one per slug).
-    /// When empty, the memory tools and the <c>{MEMORIES}</c> placeholder are disabled.
+    /// Root folder for persistent data. The model's memories are stored as flat <c>.md</c> files
+    /// under a <c>memories/</c> sub-folder. Defaults to <c>data</c> (relative to the working
+    /// directory).
     /// </summary>
-    public string? MemoryDirectory { get; init; }
+    public string DataDirectory { get; init; } = "data";
 
     /// <summary>
     /// Debugging aid: when set, the audio received from OpenAI is also written to WAV files

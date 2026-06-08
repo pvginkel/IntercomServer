@@ -30,11 +30,11 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_MODEL` | no | `gpt-realtime` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
 | `CHATGPT_WEB_SEARCH_MODEL` | no | `gpt-5.5` | Model used by the built-in `web_search` tool (see below). |
-| `CHATGPT_INSTRUCTIONS` | no | a built‑in persona | System prompt / persona for the assistant (inline). |
-| `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt. Takes precedence over `CHATGPT_INSTRUCTIONS`; read at startup. May contain the `{NOW}` placeholder (see below). |
+| `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}` and `{MEMORIES}` placeholders (see below). |
+| `CHATGPT_MEMORY_PROMPT_FILE` | no | — | Path to a file containing the instruction for the end‑of‑conversation memory turn (see *Saving memory at hang‑up* below); read at startup. When unset, a built‑in prompt is used. |
 | `CHATGPT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
-| `CHATGPT_MEMORY_DIR` | no | — | Folder for the model's memories (see *Memory* below). When unset, the memory tools and `{MEMORIES}` are disabled. |
+| `DATA_DIR` | no | `data` | Root folder for the server's persistent data. The model's memories live in a `memories/` sub-folder (see *Memory* below). |
 | `CHATGPT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the 16 kHz stream sent to the device). |
 
 The system prompt may include the placeholder **`{NOW}`**, which is replaced at the start of
@@ -43,8 +43,7 @@ date + time (with `CHATGPT_LOCALE=nl-NL`, a Dutch-formatted date like *"… 7 ju
 It is substituted per conversation, so the time is always current rather than frozen at startup.
 
 The prompt may also include **`{MEMORIES}`**, replaced (per conversation) with a Markdown
-list of the stored memories — see *Memory* below. With no memories (or `CHATGPT_MEMORY_DIR`
-unset) it becomes empty.
+list of the stored memories — see *Memory* below. With no memories yet it becomes empty.
 
 The server's UDP audio endpoint is a general (non‑ChatGPT) setting:
 
@@ -119,10 +118,10 @@ Adding an MCP server is a **config change only — no code**:
 
 ## Memory
 
-When `CHATGPT_MEMORY_DIR` is set, the model can remember things across conversations. Each
-memory is a single Markdown file in that folder (a flat list — no subfolders), named by its
-**slug**, which must end in `.md`. The **first line** of the file is its title, used as the
-summary. Four function tools are exposed to the model:
+The model can remember things across conversations. Memories are stored in a `memories/`
+sub-folder of `DATA_DIR` (default `data/memories`) — a flat list of Markdown files, no
+subfolders, each named by its **slug**, which must end in `.md`. The **first line** of the
+file is its title, used as the summary. Four function tools are exposed to the model:
 
 | Tool | Arguments | Behaviour |
 | --- | --- | --- |
@@ -141,3 +140,16 @@ with the current `list_memories` output, e.g.:
 
 So the model sees what it has remembered, and can `get_memory` by slug to read the details.
 The folder is plain `.md` files, so you can read and edit them yourself.
+
+### Saving memory at hang-up
+
+The model can call the memory tools at any point during a conversation, but it is also given
+one last chance when the conversation ends. As soon as the conversation closes — the user
+hangs up, or the model says goodbye — the device is freed immediately and, in the background,
+the model is handed a final **text-only** turn instructing it to persist anything worth
+remembering using its memory tools. This means a user can simply say *"remember that …"* and
+hang up, and it will be saved without waiting on the line. (A conversation that drops because
+of a network error skips this step, since there is no session left to ask.)
+
+The instruction given on that final turn has a built‑in default but can be overridden by
+pointing `CHATGPT_MEMORY_PROMPT_FILE` at a text file — handy for tuning what the model keeps.

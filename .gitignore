@@ -1,9 +1,13 @@
 /.vs
 /*/bin
 /*/obj
+/tmp
 *.user
 *.suo
 launchSettings.json
 
 # Real MCP server configuration may contain API tokens in headers.
 mcpservers.json
+
+# Persistent data (memories, etc.) written at runtime under DATA_DIR's default location.
+/data

@@ -16,7 +16,8 @@ internal sealed class ConversationManager(
     WebSearchTool webSearch,
     MemoryStore memory,
     AudioSender audioSender,
-    UdpAudioServer audioServer
+    UdpAudioServer audioServer,
+    ConversationCloser closer
 )
 {
     private static readonly ILogger Logger = Log.ForContext<ConversationManager>();
@@ -55,7 +56,7 @@ internal sealed class ConversationManager(
             memory,
             audioSender,
             audioServer,
-            OnConversationEnded
+            OnConversationClosing
         );
 
         if (!_conversations.TryAdd(device.DeviceId, conversation))
@@ -95,11 +96,16 @@ internal sealed class ConversationManager(
 
     public bool IsChatting(Device device) => _conversations.ContainsKey(device.DeviceId);
 
-    private void OnConversationEnded(Conversation conversation)
+    // Raised once a conversation's live phase ends (hang-up, model goodbye, error or disconnect).
+    // The device is freed immediately via SessionEnded; the conversation itself is handed to the
+    // closer, which gives the model a final memory-flush turn and then disposes it.
+    private void OnConversationClosing(Conversation conversation)
     {
         _conversations.TryRemove(conversation.Device.DeviceId, out _);
         mcp.EndConversation();
 
         SessionEnded?.Invoke(this, conversation.Device);
+
+        closer.Close(conversation);
     }
 }

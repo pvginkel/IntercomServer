@@ -8,30 +8,24 @@ using Serilog;
 
 static string? Env(string name) => Environment.GetEnvironmentVariable(name);
 
-// Resolves the ChatGPT system prompt: a file (CHATGPT_INSTRUCTIONS_FILE) takes precedence,
-// then an inline value (CHATGPT_INSTRUCTIONS), otherwise the built-in default.
-static string ResolveInstructions()
+// Returns the contents of the file named by the given environment variable, or the supplied
+// default when the variable is unset (or the file cannot be read). Used for the prompts that
+// can be overridden by pointing an env var at a text file.
+static string ResolveFileOrDefault(string fileEnvVar, string @default)
 {
-    var file = Env("CHATGPT_INSTRUCTIONS_FILE");
-    if (!string.IsNullOrEmpty(file))
-    {
-        try
-        {
-            return File.ReadAllText(file);
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(
-                ex,
-                "Could not read CHATGPT_INSTRUCTIONS_FILE '{File}'; falling back to CHATGPT_INSTRUCTIONS / default.",
-                file
-            );
-        }
-    }
+    var file = Env(fileEnvVar);
+    if (string.IsNullOrEmpty(file))
+        return @default;
 
-    return Env("CHATGPT_INSTRUCTIONS") is { Length: > 0 } instructions
-        ? instructions
-        : new ChatGptConfiguration().Instructions;
+    try
+    {
+        return File.ReadAllText(file);
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Could not read {EnvVar} '{File}'; falling back to the default.", fileEnvVar, file);
+        return @default;
+    }
 }
 
 Log.Logger = new LoggerConfiguration()
@@ -63,11 +57,18 @@ var builder = new HostBuilder().ConfigureServices(
                     : "gpt-5.5",
                 Voice = Env("CHATGPT_VOICE") is { Length: > 0 } voice ? voice : "marin",
                 Locale = Env("CHATGPT_LOCALE"),
-                Instructions = ResolveInstructions(),
+                Instructions = ResolveFileOrDefault(
+                    "CHATGPT_INSTRUCTIONS_FILE",
+                    new ChatGptConfiguration().Instructions
+                ),
+                MemoryFlushPrompt = ResolveFileOrDefault(
+                    "CHATGPT_MEMORY_PROMPT_FILE",
+                    new ChatGptConfiguration().MemoryFlushPrompt
+                ),
                 McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                     ? mcpFile
                     : "mcpservers.json",
-                MemoryDirectory = Env("CHATGPT_MEMORY_DIR"),
+                DataDirectory = Env("DATA_DIR") is { Length: > 0 } dataDir ? dataDir : "data",
                 DebugAudioDirectory = Env("CHATGPT_DEBUG_AUDIO_DIR"),
             }
         );
@@ -94,6 +95,7 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton<McpToolRegistry>();
         services.AddSingleton<WebSearchTool>();
         services.AddSingleton<MemoryStore>();
+        services.AddSingleton<ConversationCloser>();
         services.AddSingleton<ConversationManager>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());
     }
