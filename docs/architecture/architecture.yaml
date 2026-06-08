@@ -64,3 +64,11 @@ relations:
     target: cap:pub-sub-broker
     type: Association
     boundBy: "env:MQTT_HOST"
+
+  # OpenAI API (owned by the architecture producer): the ChatGPT voice-assistant
+  # bridge consumes it via the official OpenAI SDK at its hardcoded base URL, so
+  # there is no deploy-time endpoint to bind — no boundBy.
+  - id: rel:intercom-server-consumes-openai
+    source: app:intercom-server,c313fb20-b8df-4f6c-be1b-23af65e26705
+    target: svc:openai-api,b4e2a983-5c32-4ed1-94a1-6231a2112ccb
+    type: Association
