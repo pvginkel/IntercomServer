@@ -63,6 +63,7 @@ internal class Server(
 
         await client.SubscribeAsync("intercom/server/set/+");
         await client.SubscribeAsync("intercom/client/+/state");
+        await client.SubscribeAsync("intercom/client/+/ready");
         await client.SubscribeAsync("intercom/client/+/configuration");
         await client.SubscribeAsync("intercom/client/+/set/action");
     }
@@ -176,6 +177,17 @@ internal class Server(
                     device.DeviceId,
                     device.State
                 );
+
+                await state.HandleDeviceState(device);
+                break;
+
+            case "ready":
+                if (message.ConvertPayloadToString() == "true")
+                {
+                    Logger.Information("Device {Device} reported ready", device.DeviceId);
+
+                    await state.HandleDeviceReady(device);
+                }
                 break;
 
             case "set/action":

@@ -47,17 +47,7 @@ internal class StateManager
         {
             _ringing.Remove(e.Device);
 
-            if (_conversation.IsChatting(e.Device))
-            {
-                try
-                {
-                    await _conversation.EndAsync(e.Device);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error(ex, "Failed to end ChatGPT conversation");
-                }
-            }
+            await StopChat(e.Device);
 
             try
             {
@@ -68,6 +58,35 @@ internal class StateManager
                 Logger.Error(ex, "Failed to leave call");
             }
         };
+    }
+
+    // A device that has gone offline (typically surfaced by its retained last-will state
+    // message, "online": false) can no longer hang up from its own button, so stop any
+    // conversation it was holding here.
+    public async Task HandleDeviceState(Device device)
+    {
+        if (device.State?.Online == false)
+            await StopChat(device);
+    }
+
+    // A device announces it is ready right after (re)booting. If it was chatting before the
+    // reboot, that conversation is now orphaned — the device will never send the click that
+    // ends it — so stop it here.
+    public Task HandleDeviceReady(Device device) => StopChat(device);
+
+    private async Task StopChat(Device device)
+    {
+        if (!_conversation.IsChatting(device))
+            return;
+
+        try
+        {
+            await _conversation.EndAsync(device);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to end ChatGPT conversation");
+        }
     }
 
     public async Task HandleDeviceAction(Device device, DeviceAction action)
