@@ -29,6 +29,11 @@ internal sealed class ConversationCloser
 
     private async Task CloseAsync(Conversation conversation)
     {
+        Logger.Information(
+            "Starting close-out for the conversation with device {Device}.",
+            conversation.Device.DeviceId
+        );
+
         try
         {
             using var cts = new CancellationTokenSource(FlushTimeout);
