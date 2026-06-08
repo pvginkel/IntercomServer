@@ -55,11 +55,42 @@ internal class ChatGptConfiguration
     public string DataDirectory { get; init; } = "data";
 
     /// <summary>
-    /// Debugging aid: when set, the audio received from OpenAI is also written to WAV files
-    /// in this directory — both the raw 24 kHz stream and the 16 kHz stream sent to the
-    /// device. Leave empty to disable.
+    /// Debugging aid: when set, the conversation's audio is also written to WAV files in this
+    /// directory — the raw 24 kHz stream received from OpenAI, the 16 kHz stream sent to the
+    /// device, and the raw 16 kHz device microphone. Leave empty to disable.
     /// </summary>
     public string? DebugAudioDirectory { get; init; }
+
+    /// <summary>
+    /// Experimental mic noise gate. When greater than zero, the device microphone is only
+    /// forwarded to the model while the human is talking — its RMS amplitude (PCM16, 0–32767)
+    /// must reach this threshold — so the model does not pick up the device's echo of its own
+    /// voice. Set to zero to disable the gate and always forward the mic.
+    /// </summary>
+    public double MicGateThreshold { get; init; } = 1500;
+
+    /// <summary>
+    /// How long, in milliseconds, the mic must stay at or above <see cref="MicGateThreshold"/>
+    /// before the gate opens. Rejects brief echo transients that would trip a single-packet gate.
+    /// Only relevant when the gate is enabled.
+    /// </summary>
+    public int MicGateAttackMs { get; init; } = 60;
+
+    /// <summary>
+    /// Safety backstop, in milliseconds: the gate normally closes when the server's VAD reports
+    /// the user's turn ended, but if that event never arrives it force-closes after this much
+    /// continuous quiet. Keep it comfortably longer than the server's silence window. A negative
+    /// value disables the backstop entirely, depending solely on the VAD speech-stopped event.
+    /// Only relevant when the gate is enabled.
+    /// </summary>
+    public int MicGateHoldMs { get; init; } = 4000;
+
+    /// <summary>
+    /// How much audio, in milliseconds, before the detected onset to include when the gate opens,
+    /// so the quieter run-up to speech is not clipped. Implemented as a look-back buffer of
+    /// <see cref="MicGateAttackMs"/> + this many ms. Only relevant when the gate is enabled.
+    /// </summary>
+    public int MicGatePrerollMs { get; init; } = 80;
 
     public bool IsEnabled => !string.IsNullOrEmpty(ApiKey);
 }

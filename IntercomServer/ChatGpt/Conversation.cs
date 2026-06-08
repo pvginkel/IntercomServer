@@ -54,6 +54,20 @@ internal sealed class Conversation
     private readonly object _writerLock = new();
     private WaveFileWriter? _receivedWriter;
     private WaveFileWriter? _sentWriter;
+    private WaveFileWriter? _micWriter;
+    private WaveFileWriter? _modelInputWriter;
+
+    // Experimental mic noise gate state (see GateMicAudio). Touched only from OnAudioReceived,
+    // which the shared UdpAudioServer raises sequentially, so no locking is needed.
+    private bool _gateOpen;
+    private long _consecutiveLoudSamples; // continuous loud audio, for the attack requirement
+    private long _samplesSinceLoud; // quiet audio since the last loud packet, for the backstop
+    private readonly Queue<byte[]> _lookbackBuffer = new(); // recent 24 kHz audio for the open look-back
+    private int _lookbackBytes;
+
+    // Raised by the receive loop when the server's VAD reports the user's turn ended; consumed by
+    // the gate (running on the audio thread) to close it. Interlocked, as the two run concurrently.
+    private int _serverSpeechStopped;
 
     private RealtimeSessionClient? _session;
 
@@ -81,6 +95,9 @@ internal sealed class Conversation
     private readonly HashSet<string> _flushResponseIds = new();
     private readonly TaskCompletionSource _flushCompleted =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // Set when the model calls end_conversation, so the turn that did so isn't continued.
+    private volatile bool _endRequested;
 
     public Device Device { get; }
 
@@ -280,6 +297,8 @@ internal sealed class Conversation
             {
                 _receivedWriter?.Dispose();
                 _sentWriter?.Dispose();
+                _micWriter?.Dispose();
+                _modelInputWriter?.Dispose();
             }
             catch
             {
@@ -289,6 +308,8 @@ internal sealed class Conversation
             {
                 _receivedWriter = null;
                 _sentWriter = null;
+                _micWriter = null;
+                _modelInputWriter = null;
             }
         }
     }
@@ -318,6 +339,19 @@ internal sealed class Conversation
                     $"{stamp}_{deviceId}_sent_{Constants.AudioFormat.SampleRate}.wav"
                 ),
                 new WaveFormat(Constants.AudioFormat.SampleRate, 16, 1)
+            );
+            _micWriter = new WaveFileWriter(
+                Path.Combine(
+                    directory,
+                    $"{stamp}_{deviceId}_mic_{Constants.AudioFormat.SampleRate}.wav"
+                ),
+                new WaveFormat(Constants.AudioFormat.SampleRate, 16, 1)
+            );
+            // Exactly what we hand to the model as input audio (post-gate, post-resample), so we
+            // can hear what OpenAI actually received and tell good gating from a corrupt stream.
+            _modelInputWriter = new WaveFileWriter(
+                Path.Combine(directory, $"{stamp}_{deviceId}_model_input_{OpenAiSampleRate}.wav"),
+                new WaveFormat(OpenAiSampleRate, 16, 1)
             );
 
             Logger.Information(
@@ -377,16 +411,8 @@ internal sealed class Conversation
                         _flushResponseIds.Add(createdId);
                         break;
 
-                    case RealtimeServerUpdateResponseDone done
-                        when _flushing
-                            && done.Response?.Id is { Length: > 0 } doneId
-                            && _flushResponseIds.Contains(doneId)
-                            && !done.Response.OutputItems.Any(item =>
-                                item is RealtimeFunctionCallItem
-                            ):
-                        // A closing-turn response finished without making another tool call:
-                        // memory is persisted, so the flush is done.
-                        _flushCompleted.TrySetResult();
+                    case RealtimeServerUpdateResponseDone done:
+                        await HandleResponseDone(session, done, cancellationToken);
                         break;
 
                     case RealtimeServerUpdateInputAudioBufferSpeechStarted:
@@ -394,6 +420,13 @@ internal sealed class Conversation
                         // any in-flight model response; drop the audio we have buffered so the
                         // assistant stops promptly instead of talking over the user.
                         _audioOut.Discard();
+                        break;
+
+                    case RealtimeServerUpdateInputAudioBufferSpeechStopped:
+                        // Server VAD reached the end of the user's turn. Signal the gate to close so
+                        // we stop forwarding right when the model is about to respond (rather than
+                        // guessing with a fixed hold).
+                        Interlocked.Exchange(ref _serverSpeechStopped, 1);
                         break;
 
                     case RealtimeServerUpdateError error:
@@ -455,6 +488,7 @@ internal sealed class Conversation
                         cancellationToken
                     )
             );
+            _endRequested = true;
             End();
             return;
         }
@@ -486,14 +520,45 @@ internal sealed class Conversation
                 )
         );
 
-        // Continue the turn. During the closing memory flush, keep continuations text-only and
-        // limited to the memory tools (BuildMemoryFlushOptions) instead of the spoken default.
-        await SendGuardedAsync(
-            () =>
-                _flushing
-                    ? session.StartResponseAsync(BuildMemoryFlushOptions(), cancellationToken)
-                    : session.StartResponseAsync(cancellationToken)
-        );
+        // The turn is continued once, from HandleResponseDone, after the response that emitted the
+        // call(s) completes — not here. Doing it per tool output makes parallel tool calls each
+        // start a response, and all but the first fail with conversation_already_has_active_response.
+    }
+
+    // Runs when any response completes. A response that emitted function calls has had all its tool
+    // outputs submitted by now (during the preceding ArgumentsDone events), so we continue the turn
+    // with exactly one response — flush-aware, and skipped when the model asked to hang up. Also
+    // detects completion of the closing memory flush.
+    private async Task HandleResponseDone(
+        RealtimeSessionClient session,
+        RealtimeServerUpdateResponseDone done,
+        CancellationToken cancellationToken
+    )
+    {
+        var hadFunctionCall =
+            done.Response?.OutputItems.Any(item => item is RealtimeFunctionCallItem) == true;
+
+        if (hadFunctionCall && !_endRequested)
+        {
+            // Continue the turn. During the closing memory flush, keep continuations text-only and
+            // limited to the memory tools (BuildMemoryFlushOptions) instead of the spoken default.
+            await SendGuardedAsync(
+                () =>
+                    _flushing
+                        ? session.StartResponseAsync(BuildMemoryFlushOptions(), cancellationToken)
+                        : session.StartResponseAsync(cancellationToken)
+            );
+            return;
+        }
+
+        // A closing-turn response that finished without making another tool call means memory is
+        // persisted, so the flush is done.
+        if (
+            _flushing
+            && done.Response?.Id is { Length: > 0 } doneId
+            && _flushResponseIds.Contains(doneId)
+        )
+            _flushCompleted.TrySetResult();
     }
 
     private async void OnAudioReceived(object? sender, UdpAudioDataEventArgs e)
@@ -509,9 +574,23 @@ internal sealed class Conversation
 
         try
         {
-            var pcm24 = _micResampler.Resample(e.Data.AsSpan(4));
-            if (pcm24.Length == 0)
+            // Debug capture: the raw microphone audio as received from the device, before any
+            // resampling or gating. Paired with the received/sent writers, this gives a basis
+            // for tuning the gate threshold against the model's own (echoed) voice.
+            lock (_writerLock)
+                _micWriter?.Write(e.Data, 4, e.Data.Length - 4);
+
+            // Resample to 24 kHz and run the experimental noise gate, which forwards the mic only
+            // while the human is talking (with a short look-back so onsets are not clipped) so the
+            // model does not pick up the device's echo of its own voice. Null while the gate is
+            // closed — nothing is forwarded then.
+            var pcm24 = GateMicAudio(e.Data.AsSpan(4));
+            if (pcm24 is not { Length: > 0 })
                 return;
+
+            // Debug capture: the exact audio handed to the model, snippet by snippet.
+            lock (_writerLock)
+                _modelInputWriter?.Write(pcm24, 0, pcm24.Length);
 
             await SendGuardedAsync(
                 () => session.SendInputAudioAsync(BinaryData.FromBytes(pcm24), _cts.Token)
@@ -529,6 +608,142 @@ internal sealed class Conversation
         {
             Logger.Debug(ex, "Failed to forward microphone audio to ChatGPT");
         }
+    }
+
+    // Resamples a mic packet to 24 kHz and runs the noise gate, returning the audio to forward to
+    // the model — or null to forward nothing while the gate is closed. When the gate is disabled
+    // (threshold <= 0) it just forwards the live resampled audio.
+    //
+    // The gate opens once it has seen MicGateAttackMs of continuous audio at or above the
+    // threshold (so brief echo transients don't trip it), and on opening flushes the buffered
+    // MicGateAttackMs + MicGatePrerollMs of recent audio so the utterance onset isn't clipped.
+    //
+    // While open it forwards everything live, so the server's VAD sees a continuous stream and can
+    // detect the end of the turn; it closes when the server reports speech-stopped. MicGateHoldMs
+    // is only a safety backstop, force-closing the gate after that much continuous quiet in case
+    // the speech-stopped event never arrives. Forwarding nothing (rather than silence) while closed
+    // keeps the model's own echo out of its input.
+    private byte[]? GateMicAudio(ReadOnlySpan<byte> mic)
+    {
+        // Always resample so the resampler stays continuous even across muted gaps.
+        var pcm24 = _micResampler.Resample(mic);
+
+        var threshold = _configuration.MicGateThreshold;
+        if (threshold <= 0)
+            return pcm24; // gate disabled: forward live
+
+        var sampleCount = mic.Length / 2;
+        if (sampleCount == 0)
+            return _gateOpen ? pcm24 : null;
+
+        var sampleRate = Constants.AudioFormat.SampleRate;
+        var attackSamples = (long)_configuration.MicGateAttackMs * sampleRate / 1000;
+        var backstopSamples = (long)_configuration.MicGateHoldMs * sampleRate / 1000;
+
+        var rms = Rms(mic, sampleCount);
+        if (rms >= threshold)
+        {
+            _consecutiveLoudSamples += sampleCount;
+            _samplesSinceLoud = 0;
+        }
+        else
+        {
+            _consecutiveLoudSamples = 0;
+            _samplesSinceLoud += sampleCount;
+        }
+
+        var wasOpen = _gateOpen;
+        string? closeReason = null;
+        if (!_gateOpen)
+        {
+            if (_consecutiveLoudSamples >= attackSamples)
+            {
+                _gateOpen = true;
+                // Discard any speech-stopped left over from the previous turn so it can't close
+                // this freshly opened one.
+                Interlocked.Exchange(ref _serverSpeechStopped, 0);
+            }
+        }
+        else if (Interlocked.Exchange(ref _serverSpeechStopped, 0) == 1)
+        {
+            _gateOpen = false;
+            closeReason = "server speech-stopped";
+        }
+        else if (_configuration.MicGateHoldMs >= 0 && _samplesSinceLoud > backstopSamples)
+        {
+            // Backstop only; a negative MicGateHoldMs disables it (depend solely on VAD events).
+            _gateOpen = false;
+            closeReason = "backstop";
+        }
+
+        if (_gateOpen != wasOpen)
+        {
+            if (_gateOpen)
+                Logger.Information(
+                    "Mic gate started accepting audio for {Device} (rms {Rms:F0}, threshold {Threshold:F0})",
+                    Device.DeviceId,
+                    rms,
+                    threshold
+                );
+            else
+                Logger.Information(
+                    "Mic gate stopped accepting audio for {Device} ({Reason})",
+                    Device.DeviceId,
+                    closeReason
+                );
+        }
+
+        // Keep a rolling look-back of the most recent attack + pre-roll of audio, so that when the
+        // gate opens we can flush the run-up that preceded detection.
+        if (pcm24.Length > 0)
+        {
+            _lookbackBuffer.Enqueue(pcm24);
+            _lookbackBytes += pcm24.Length;
+            var capBytes =
+                (_configuration.MicGateAttackMs + _configuration.MicGatePrerollMs)
+                * OpenAiSampleRate
+                * 2
+                / 1000;
+            while (
+                _lookbackBuffer.Count > 1
+                && _lookbackBytes - _lookbackBuffer.Peek().Length >= capBytes
+            )
+                _lookbackBytes -= _lookbackBuffer.Dequeue().Length;
+        }
+
+        if (_gateOpen && !wasOpen)
+            return FlushLookback(); // just opened: flush the buffered onset (includes this packet)
+        if (_gateOpen)
+            return pcm24; // still open: forward live
+        return null; // closed: forward nothing
+    }
+
+    // Concatenates and clears the look-back buffer; called when the gate opens.
+    private byte[] FlushLookback()
+    {
+        var result = new byte[_lookbackBytes];
+        var offset = 0;
+        foreach (var chunk in _lookbackBuffer)
+        {
+            Buffer.BlockCopy(chunk, 0, result, offset, chunk.Length);
+            offset += chunk.Length;
+        }
+
+        _lookbackBuffer.Clear();
+        _lookbackBytes = 0;
+        return result;
+    }
+
+    private static double Rms(ReadOnlySpan<byte> pcm16, int sampleCount)
+    {
+        long sumSquares = 0;
+        for (var i = 0; i < sampleCount; i++)
+        {
+            short sample = (short)(pcm16[i * 2] | (pcm16[i * 2 + 1] << 8));
+            sumSquares += (long)sample * sample;
+        }
+
+        return Math.Sqrt((double)sumSquares / sampleCount);
     }
 
     private async Task RunAudioPump()

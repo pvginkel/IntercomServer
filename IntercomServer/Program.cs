@@ -1,4 +1,5 @@
-﻿using IntercomServer;
+﻿using System.Globalization;
+using IntercomServer;
 using IntercomServer.ChatGpt;
 using IntercomServer.Utils;
 using Microsoft.Extensions.DependencyInjection;
@@ -70,6 +71,26 @@ var builder = new HostBuilder().ConfigureServices(
                     : "mcpservers.json",
                 DataDirectory = Env("DATA_DIR") is { Length: > 0 } dataDir ? dataDir : "data",
                 DebugAudioDirectory = Env("CHATGPT_DEBUG_AUDIO_DIR"),
+                MicGateThreshold = double.TryParse(
+                    Env("CHATGPT_MIC_GATE_THRESHOLD"),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out var micGate
+                )
+                    ? micGate
+                    : new ChatGptConfiguration().MicGateThreshold,
+                MicGateAttackMs = int.TryParse(Env("CHATGPT_MIC_GATE_ATTACK_MS"), out var micAttack)
+                    ? micAttack
+                    : new ChatGptConfiguration().MicGateAttackMs,
+                MicGateHoldMs = int.TryParse(Env("CHATGPT_MIC_GATE_HOLD_MS"), out var micHold)
+                    ? micHold
+                    : new ChatGptConfiguration().MicGateHoldMs,
+                MicGatePrerollMs = int.TryParse(
+                    Env("CHATGPT_MIC_GATE_PREROLL_MS"),
+                    out var micPreroll
+                )
+                    ? micPreroll
+                    : new ChatGptConfiguration().MicGatePrerollMs,
             }
         );
         services.AddSingleton(
