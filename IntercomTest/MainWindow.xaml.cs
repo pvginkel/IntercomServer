@@ -81,7 +81,7 @@ public partial class MainWindow
                 };
             }
 
-#if true
+#if false
             await Task.Delay(TimeSpan.FromSeconds(0.1));
 
             _aecTest.PerformClick();
