@@ -35,14 +35,21 @@ internal class ChatGptConfiguration
         + "When the user says goodbye or clearly wants to stop, call the end_conversation tool to hang up.";
 
     /// <summary>
-    /// Instruction handed to the model on the final, audio-free turn when a conversation ends, so
-    /// it can persist anything worth remembering using its memory tools before hang-up.
+    /// Free-form instruction handed to the model on the final, audio-free turn when a conversation
+    /// ends (the "close-out" turn). It can say anything: persist memory, finish a deferred request
+    /// such as sending an email, etc. There is deliberately no built-in default — it is
+    /// <b>required</b> when the feature is enabled (see <see cref="Validate"/>) and supplied via
+    /// <c>CHATGPT_CLOSE_OUT_PROMPT_FILE</c>.
     /// </summary>
-    public string MemoryFlushPrompt { get; init; } =
-        "The conversation has ended. Silently review what was said and, using your memory tools, "
-        + "save or update anything worth remembering for next time. Focus specifically on "
-        + "preferences and corrections the user stated, and store information that will answer the "
-        + "users question faster next time. Produce no spoken reply.";
+    public string CloseOutPrompt { get; init; } = "";
+
+    /// <summary>
+    /// Hard cap, in seconds, on the background close-out turn, after which it is abandoned so a
+    /// stuck model can't keep a session (and its MCP lease) open forever. Generous by default
+    /// because close-out may make real tool calls — loading an MCP server and, say, sending an
+    /// email takes several model turns and round-trips. Must be greater than zero.
+    /// </summary>
+    public int CloseOutTimeoutSeconds { get; init; } = 30;
 
     /// <summary>Path to the JSON file describing the MCP servers to expose as tools.</summary>
     public string McpConfigFile { get; init; } = "mcpservers.json";
@@ -93,4 +100,27 @@ internal class ChatGptConfiguration
     public int MicGatePrerollMs { get; init; } = 80;
 
     public bool IsEnabled => !string.IsNullOrEmpty(ApiKey);
+
+    /// <summary>
+    /// Validates the configuration at startup, throwing on a fatal misconfiguration so the app
+    /// fails fast rather than misbehaving at runtime. When the feature is enabled a close-out
+    /// prompt is mandatory: the model is given a final close-out turn at hang-up (which may finish
+    /// deferred work such as sending an email), and silently skipping it would be surprising.
+    /// </summary>
+    public void Validate()
+    {
+        if (!IsEnabled)
+            return;
+
+        if (string.IsNullOrWhiteSpace(CloseOutPrompt))
+            throw new InvalidOperationException(
+                "CHATGPT_CLOSE_OUT_PROMPT_FILE is required when ChatGPT is enabled (OPENAI_API_KEY "
+                    + "is set): it supplies the prompt for the end-of-conversation close-out turn."
+            );
+
+        if (CloseOutTimeoutSeconds <= 0)
+            throw new InvalidOperationException(
+                "CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS must be greater than zero."
+            );
+    }
 }

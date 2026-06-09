@@ -34,7 +34,7 @@ internal sealed class Conversation
     private static readonly ILogger Logger = Log.ForContext<Conversation>();
 
     private readonly ChatGptConfiguration _configuration;
-    private readonly McpToolRegistry _mcp;
+    private readonly McpLease _mcpLease;
     private readonly WebSearchTool _webSearch;
     private readonly MemoryStore _memory;
     private readonly AudioSender _audioSender;
@@ -81,7 +81,7 @@ internal sealed class Conversation
     // configuration to add tools (EnableServerAsync) does not re-substitute {NOW}/{MEMORIES}.
     private string _instructions = "";
 
-    // Lifecycle: Active while bridging audio, Closing during the final memory-flush turn,
+    // Lifecycle: Active while bridging audio, Closing during the final close-out turn,
     // Disposed once torn down. Guarded by _stateLock.
     private enum State
     {
@@ -95,15 +95,15 @@ internal sealed class Conversation
     private int _closingRaised;
 
     // Set once the receive loop has stopped, so a hand-off close knows the session is already
-    // gone and there is nothing left to flush through.
+    // gone and there is nothing left to close out through.
     private volatile bool _receiveLoopEnded;
 
-    // Memory-flush bookkeeping. _flushing is set while the closing turn runs; _flushResponseIds
+    // Close-out bookkeeping. _closingOut is set while the close-out turn runs; _closeOutResponseIds
     // collects the responses created during it (touched only from the receive loop) so we can
     // tell its completion apart from a reply we cancelled on the way in.
-    private volatile bool _flushing;
-    private readonly HashSet<string> _flushResponseIds = new();
-    private readonly TaskCompletionSource _flushCompleted =
+    private volatile bool _closingOut;
+    private readonly HashSet<string> _closeOutResponseIds = new();
+    private readonly TaskCompletionSource _closeOutCompleted =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     // Set when the model calls end_conversation, so the turn that did so isn't continued.
@@ -124,13 +124,17 @@ internal sealed class Conversation
     {
         Device = device;
         _configuration = configuration;
-        _mcp = mcp;
         _webSearch = webSearch;
         _memory = memory;
         _audioSender = audioSender;
         _audioServer = audioServer;
         _onClosing = onClosing;
         _deviceEndpoint = IPEndPoint.Parse(device.Configuration!.Endpoint!);
+
+        // Take the MCP lease last, once nothing above can throw: it keeps the shared MCP
+        // connections open for this conversation's whole lifetime (through close-out) and is
+        // released in DisposeResources. Past this point the registry is reached only via the lease.
+        _mcpLease = mcp.Lease();
     }
 
     public async Task StartAsync()
@@ -181,7 +185,7 @@ internal sealed class Conversation
         if (Interlocked.Exchange(ref _closingRaised, 1) != 0)
             return;
 
-        // Stop bridging audio right away; the closing turn is text-only and the owner is about
+        // Stop bridging audio right away; the close-out turn is text-only and the owner is about
         // to free the device.
         StopAudio();
         _onClosing(this);
@@ -198,11 +202,12 @@ internal sealed class Conversation
     }
 
     /// <summary>
-    /// Gives the model one last audio-free turn to persist memory with its memory tools, returning
-    /// once that turn completes (or is cancelled). A no-op when the session is already gone (e.g.
-    /// the socket dropped). Called by <see cref="ConversationCloser"/> after the device is freed.
+    /// Runs the final, audio-free close-out turn: the model is handed the free-form close-out
+    /// prompt (which by default persists memory) with its memory tools available, returning once
+    /// that turn completes (or is cancelled). A no-op when the session is already gone (e.g. the
+    /// socket dropped). Called by <see cref="ConversationCloser"/> after the device is freed.
     /// </summary>
-    public async Task FlushMemoryAsync(CancellationToken cancellationToken)
+    public async Task CloseOutAsync(CancellationToken cancellationToken)
     {
         var session = _session;
         if (session == null || _receiveLoopEnded)
@@ -221,23 +226,23 @@ internal sealed class Conversation
         );
         var token = linked.Token;
 
-        _flushing = true;
+        _closingOut = true;
 
-        // Cancel a half-finished reply (if any) so we can run our own closing turn, then ask the
-        // model to update memory using only the memory tools — no audio, and no MCP, whose
+        // Cancel a half-finished reply (if any) so we can run our own close-out turn, then hand the
+        // model the close-out prompt with only the memory tools — no audio, and no MCP, whose
         // connections are released the moment the conversation is handed over.
         await TryCancelResponseAsync(session, token);
 
         await SendGuardedAsync(
             () =>
                 session.AddItemAsync(
-                    RealtimeItem.CreateSystemMessageItem(_configuration.MemoryFlushPrompt),
+                    RealtimeItem.CreateSystemMessageItem(_configuration.CloseOutPrompt),
                     token
                 )
         );
-        await SendGuardedAsync(() => session.StartResponseAsync(BuildMemoryFlushOptions(), token));
+        await SendGuardedAsync(() => session.StartResponseAsync(BuildCloseOutOptions(), token));
 
-        await _flushCompleted.Task.WaitAsync(token);
+        await _closeOutCompleted.Task.WaitAsync(token);
     }
 
     private async Task TryCancelResponseAsync(
@@ -260,13 +265,17 @@ internal sealed class Conversation
         }
     }
 
-    // The closing turn is text-only (no spoken reply) and may use only the memory tools.
-    private RealtimeResponseOptions BuildMemoryFlushOptions()
+    // The close-out turn differs from a live turn only in being text-only (no spoken reply, which
+    // also avoids paying for audio output the freed device would never hear). It deliberately does
+    // NOT set its own tool list: leaving Tools unset makes the response inherit the session's
+    // current tools, so no tool schemas are re-sent (keeping token use down) and the model keeps
+    // whatever servers it had loaded. The MCP lease is still held, so it can load another server
+    // (use_<server>) and finish a deferred request after hang-up — e.g. actually send the email the
+    // user asked for on their way out. end_conversation stays available too; see HandleFunctionCall.
+    private RealtimeResponseOptions BuildCloseOutOptions()
     {
         var options = new RealtimeResponseOptions();
         options.OutputModalities.Add(RealtimeOutputModality.Text);
-        foreach (var tool in _memory.GetRealtimeTools())
-            options.Tools.Add(tool);
         return options;
     }
 
@@ -299,6 +308,11 @@ internal sealed class Conversation
         {
             // Ignore.
         }
+
+        // Release the MCP lease. This conversation is the last to need it once it is being torn
+        // down (the close-out turn, the only thing that runs after hand-over, has already finished
+        // or timed out by now), so this is what lets the shared connections close.
+        _mcpLease.Dispose();
 
         _cts.Dispose();
 
@@ -416,10 +430,10 @@ internal sealed class Conversation
                         break;
 
                     case RealtimeServerUpdateResponseCreated created
-                        when _flushing && created.Response?.Id is { Length: > 0 } createdId:
-                        // Track the responses belonging to the closing turn so we can recognise
+                        when _closingOut && created.Response?.Id is { Length: > 0 } createdId:
+                        // Track the responses belonging to the close-out turn so we can recognise
                         // its completion (and ignore a reply we cancelled on the way in).
-                        _flushResponseIds.Add(createdId);
+                        _closeOutResponseIds.Add(createdId);
                         break;
 
                     case RealtimeServerUpdateResponseDone done:
@@ -468,8 +482,8 @@ internal sealed class Conversation
     {
         _receiveLoopEnded = true;
 
-        // Unblock a closing turn that will never complete now the stream has stopped.
-        _flushCompleted.TrySetResult();
+        // Unblock a close-out turn that will never complete now the stream has stopped.
+        _closeOutCompleted.TrySetResult();
 
         // The update stream stopped: server hang-up, network error, or our own teardown after a
         // graceful close. Make sure the conversation is handed off so the device is freed
@@ -488,6 +502,24 @@ internal sealed class Conversation
 
         if (name == EndConversationTool)
         {
+            if (_closingOut)
+            {
+                // We are already closing out, so there is nothing left to end. Rather than dropping
+                // end_conversation from the close-out turn (which would mutate the tool set and
+                // re-cost tokens), keep it and just report the error; the close-out turn continues.
+                await SendGuardedAsync(
+                    () =>
+                        session.AddItemAsync(
+                            new RealtimeFunctionCallOutputItem(
+                                functionCall.CallId,
+                                "Error: the call has already ended."
+                            ),
+                            cancellationToken
+                        )
+                );
+                return;
+            }
+
             Logger.Information(
                 "Model requested to end the conversation with {Device}.",
                 Device.DeviceId
@@ -504,7 +536,7 @@ internal sealed class Conversation
             return;
         }
 
-        if (_mcp.TryResolveSelector(name, out var serverName))
+        if (_mcpLease.TryResolveSelector(name, out var serverName))
         {
             string selectorOutput;
             if (_enabledServers.Contains(serverName))
@@ -545,7 +577,7 @@ internal sealed class Conversation
             else if (name == WebSearchTool.ToolName)
                 output = await _webSearch.SearchAsync(arguments, cancellationToken);
             else
-                output = await _mcp.CallAsync(name, arguments, cancellationToken);
+                output = await _mcpLease.CallAsync(name, arguments, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -568,8 +600,8 @@ internal sealed class Conversation
 
     // Runs when any response completes. A response that emitted function calls has had all its tool
     // outputs submitted by now (during the preceding ArgumentsDone events), so we continue the turn
-    // with exactly one response — flush-aware, and skipped when the model asked to hang up. Also
-    // detects completion of the closing memory flush.
+    // with exactly one response — close-out-aware, and skipped when the model asked to hang up.
+    // Also detects completion of the close-out turn.
     private async Task HandleResponseDone(
         RealtimeSessionClient session,
         RealtimeServerUpdateResponseDone done,
@@ -581,25 +613,25 @@ internal sealed class Conversation
 
         if (hadFunctionCall && !_endRequested)
         {
-            // Continue the turn. During the closing memory flush, keep continuations text-only and
-            // limited to the memory tools (BuildMemoryFlushOptions) instead of the spoken default.
+            // Continue the turn. During the close-out turn, keep continuations text-only and
+            // limited to the memory tools (BuildCloseOutOptions) instead of the spoken default.
             await SendGuardedAsync(
                 () =>
-                    _flushing
-                        ? session.StartResponseAsync(BuildMemoryFlushOptions(), cancellationToken)
+                    _closingOut
+                        ? session.StartResponseAsync(BuildCloseOutOptions(), cancellationToken)
                         : session.StartResponseAsync(cancellationToken)
             );
             return;
         }
 
-        // A closing-turn response that finished without making another tool call means memory is
-        // persisted, so the flush is done.
+        // A close-out response that finished without making another tool call means the close-out
+        // turn is done.
         if (
-            _flushing
+            _closingOut
             && done.Response?.Id is { Length: > 0 } doneId
-            && _flushResponseIds.Contains(doneId)
+            && _closeOutResponseIds.Contains(doneId)
         )
-            _flushCompleted.TrySetResult();
+            _closeOutCompleted.TrySetResult();
     }
 
     private async void OnAudioReceived(object? sender, UdpAudioDataEventArgs e)
@@ -877,11 +909,11 @@ internal sealed class Conversation
     // tools are loaded on demand (see EnableServerAsync) to keep the baseline context small.
     private void AddTools(RealtimeConversationSessionOptions options)
     {
-        foreach (var tool in _mcp.GetServerSelectorTools())
+        foreach (var tool in _mcpLease.GetServerSelectorTools())
             options.Tools.Add(tool);
 
         foreach (var server in _enabledServers)
-        foreach (var tool in _mcp.GetServerTools(server))
+        foreach (var tool in _mcpLease.GetServerTools(server))
             options.Tools.Add(tool);
 
         foreach (var tool in _memory.GetRealtimeTools())
@@ -894,7 +926,8 @@ internal sealed class Conversation
     // Loads a server's tools into the live session in response to a use_<server> selector call, by
     // re-issuing the session configuration (a session.update) with the now-larger tool set. The
     // model sees the new tools on its next response — driven by the turn continuation in
-    // HandleResponseDone after the calling response completes.
+    // HandleResponseDone after the calling response completes. This works during close-out too: the
+    // close-out responses inherit the session tools, so a server loaded then becomes callable.
     private async Task EnableServerAsync(string serverName, CancellationToken cancellationToken)
     {
         _enabledServers.Add(serverName);

@@ -23,12 +23,13 @@ namespace IntercomServer.ChatGpt;
 /// This trades one extra round-trip per server for a dramatically smaller baseline tool set.
 ///
 /// Tools are discovered once at startup (each discovery connection is closed immediately).
-/// Execution connections are opened lazily and kept alive only while at least one
-/// conversation is active (reference-counted via <see cref="BeginConversation"/> /
-/// <see cref="EndConversation"/>), then closed. This avoids a long-lived idle SSE session,
-/// which servers and proxies drop (a later call would otherwise fail with "No active SSE
-/// connection for session …"), while still sharing one connection across overlapping
-/// conversations.
+/// Execution connections are opened lazily and kept alive only while at least one conversation
+/// holds a lease (see <see cref="Lease"/>); when the last lease is disposed they are closed. A
+/// conversation keeps its lease until it is disposed — through its close-out turn — so the servers
+/// stay reachable for that final turn (e.g. to send a message the user asked for just before
+/// hanging up). This avoids a long-lived idle SSE session, which servers and proxies drop (a later
+/// call would otherwise fail with "No active SSE connection for session …"), while still sharing
+/// one connection across overlapping conversations.
 ///
 /// To add a new MCP server, drop an entry in the JSON config file (see docs/CHATGPT_MCP.md).
 /// No code changes are required.
@@ -55,7 +56,7 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Task<McpClient>> _connections = new();
-    private int _activeConversations;
+    private int _leaseCount;
 
     private sealed record RegisteredTool(
         McpServerConfig Server,
@@ -197,31 +198,32 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
     }
 
     /// <summary>
-    /// Marks a conversation as active. While at least one is active, execution connections
-    /// are kept open and shared. Balance every call with <see cref="EndConversation"/>.
+    /// Acquires a lease on the MCP servers. While at least one lease is held the shared execution
+    /// connections are kept open; disposing the last lease closes them. Each conversation holds a
+    /// lease for its whole lifetime — through its close-out turn — and disposes it when disposed.
     /// </summary>
-    public void BeginConversation()
+    public McpLease Lease()
     {
         lock (_gate)
         {
-            _activeConversations++;
+            _leaseCount++;
         }
+
+        return new McpLease(this);
     }
 
-    /// <summary>
-    /// Marks a conversation as ended. When the last one ends, all open execution connections
-    /// are closed.
-    /// </summary>
-    public void EndConversation()
+    // Releases a lease (called by McpLease.Dispose). When the last lease is released, all open
+    // execution connections are closed.
+    internal void ReleaseLease()
     {
         Task<McpClient>[]? toDispose = null;
 
         lock (_gate)
         {
-            if (_activeConversations > 0)
-                _activeConversations--;
+            if (_leaseCount > 0)
+                _leaseCount--;
 
-            if (_activeConversations == 0 && _connections.Count > 0)
+            if (_leaseCount == 0 && _connections.Count > 0)
             {
                 toDispose = [.. _connections.Values];
                 _connections.Clear();
@@ -236,7 +238,7 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
     /// Builds the one-per-server <c>use_&lt;server&gt;</c> selector tools that are always present in a
     /// session. Calling one loads that server's actual tools (see <see cref="GetServerTools"/>).
     /// </summary>
-    public IEnumerable<RealtimeFunctionTool> GetServerSelectorTools()
+    internal IEnumerable<RealtimeFunctionTool> GetServerSelectorTools()
     {
         foreach (var entry in _servers)
         {
@@ -252,7 +254,7 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
     /// Maps a selector tool name (<c>use_&lt;server&gt;</c>) back to its server, or returns false when
     /// <paramref name="functionName"/> is not a selector.
     /// </summary>
-    public bool TryResolveSelector(string functionName, out string serverName)
+    internal bool TryResolveSelector(string functionName, out string serverName)
     {
         if (_selectorToServer.TryGetValue(functionName, out var name))
         {
@@ -265,7 +267,7 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
     }
 
     /// <summary>Builds the function tool definitions for the tools of a single (loaded) server.</summary>
-    public IEnumerable<RealtimeFunctionTool> GetServerTools(string serverName)
+    internal IEnumerable<RealtimeFunctionTool> GetServerTools(string serverName)
     {
         if (!_serversByName.TryGetValue(serverName, out var entry))
             yield break;
@@ -283,7 +285,7 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
     }
 
     /// <summary>Invokes a registered MCP tool and returns its textual output.</summary>
-    public async Task<string> CallAsync(
+    internal async Task<string> CallAsync(
         string functionName,
         string argumentsJson,
         CancellationToken cancellationToken
@@ -414,6 +416,45 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
         );
 
         return sanitized.Length <= 64 ? sanitized : sanitized[..64];
+    }
+}
+
+/// <summary>
+/// A conversation's handle to the MCP servers, and the only way it reaches them. Holding the
+/// lease keeps the shared execution connections open; disposing it releases the conversation's
+/// hold, and once the last lease is gone the connections are closed. The lease travels with its
+/// <see cref="Conversation"/> and is disposed only when the conversation is disposed — after its
+/// close-out turn — so MCP tools remain callable during that final turn.
+/// </summary>
+internal sealed class McpLease(McpToolRegistry registry) : IDisposable
+{
+    private int _disposed;
+
+    /// <summary>The per-server <c>use_&lt;server&gt;</c> selector tools, always present in a session.</summary>
+    public IEnumerable<RealtimeFunctionTool> GetServerSelectorTools() =>
+        registry.GetServerSelectorTools();
+
+    /// <summary>Maps a selector tool name back to its server, or false when it is not a selector.</summary>
+    public bool TryResolveSelector(string functionName, out string serverName) =>
+        registry.TryResolveSelector(functionName, out serverName);
+
+    /// <summary>The function tool definitions for the tools of a single (loaded) server.</summary>
+    public IEnumerable<RealtimeFunctionTool> GetServerTools(string serverName) =>
+        registry.GetServerTools(serverName);
+
+    /// <summary>Invokes a registered MCP tool and returns its textual output.</summary>
+    public Task<string> CallAsync(
+        string functionName,
+        string argumentsJson,
+        CancellationToken cancellationToken
+    ) => registry.CallAsync(functionName, argumentsJson, cancellationToken);
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        registry.ReleaseLease();
     }
 }
 

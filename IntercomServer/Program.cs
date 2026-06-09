@@ -29,6 +29,14 @@ static string ResolveFileOrDefault(string fileEnvVar, string @default)
     }
 }
 
+// Fails fast on a fatal misconfiguration (see ChatGptConfiguration.Validate) before the config is
+// registered, so the host never starts in a broken state.
+static ChatGptConfiguration Validated(ChatGptConfiguration configuration)
+{
+    configuration.Validate();
+    return configuration;
+}
+
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
@@ -49,7 +57,7 @@ var builder = new HostBuilder().ConfigureServices(
             }
         );
         services.AddSingleton(
-            new ChatGptConfiguration
+            Validated(new ChatGptConfiguration
             {
                 ApiKey = Env("OPENAI_API_KEY"),
                 Model = Env("CHATGPT_MODEL") is { Length: > 0 } model ? model : "gpt-realtime-2",
@@ -62,10 +70,14 @@ var builder = new HostBuilder().ConfigureServices(
                     "CHATGPT_INSTRUCTIONS_FILE",
                     new ChatGptConfiguration().Instructions
                 ),
-                MemoryFlushPrompt = ResolveFileOrDefault(
-                    "CHATGPT_MEMORY_PROMPT_FILE",
-                    new ChatGptConfiguration().MemoryFlushPrompt
-                ),
+                // Required when the feature is enabled; ChatGptConfiguration.Validate enforces it.
+                CloseOutPrompt = ResolveFileOrDefault("CHATGPT_CLOSE_OUT_PROMPT_FILE", ""),
+                CloseOutTimeoutSeconds = int.TryParse(
+                    Env("CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS"),
+                    out var closeOutTimeout
+                )
+                    ? closeOutTimeout
+                    : new ChatGptConfiguration().CloseOutTimeoutSeconds,
                 McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                     ? mcpFile
                     : "mcpservers.json",
@@ -91,7 +103,7 @@ var builder = new HostBuilder().ConfigureServices(
                 )
                     ? micPreroll
                     : new ChatGptConfiguration().MicGatePrerollMs,
-            }
+            })
         );
         services.AddSingleton(
             new AudioServerConfiguration

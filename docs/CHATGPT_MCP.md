@@ -31,7 +31,8 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
 | `CHATGPT_WEB_SEARCH_MODEL` | no | `gpt-5.5` | Model used by the built-in `web_search` tool (see below). |
 | `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}` and `{MEMORIES}` placeholders (see below). |
-| `CHATGPT_MEMORY_PROMPT_FILE` | no | — | Path to a file containing the instruction for the end‑of‑conversation memory turn (see *Saving memory at hang‑up* below); read at startup. When unset, a built‑in prompt is used. |
+| `CHATGPT_CLOSE_OUT_PROMPT_FILE` | **yes** (when enabled) | — | Path to a file containing the free‑form instruction for the end‑of‑conversation **close‑out** turn (see *Close‑out turn* below); read at startup. **Required** whenever `OPENAI_API_KEY` is set — there is no built‑in default, and the app refuses to start without it. |
+| `CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS` | no | `30` | Hard cap on the background close‑out turn (see *Close‑out turn* below). Generous by default because close‑out may make MCP tool calls (e.g. sending an email). Must be greater than zero. |
 | `CHATGPT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
 | `DATA_DIR` | no | `data` | Root folder for the server's persistent data. The model's memories live in a `memories/` sub-folder (see *Memory* below). |
@@ -170,15 +171,30 @@ with the current `list_memories` output, e.g.:
 So the model sees what it has remembered, and can `get_memory` by slug to read the details.
 The folder is plain `.md` files, so you can read and edit them yourself.
 
-### Saving memory at hang-up
+### Close-out turn
 
-The model can call the memory tools at any point during a conversation, but it is also given
-one last chance when the conversation ends. As soon as the conversation closes — the user
-hangs up, or the model says goodbye — the device is freed immediately and, in the background,
-the model is handed a final **text-only** turn instructing it to persist anything worth
-remembering using its memory tools. This means a user can simply say *"remember that …"* and
-hang up, and it will be saved without waiting on the line. (A conversation that drops because
-of a network error skips this step, since there is no session left to ask.)
+When a conversation ends, the model is given one final turn. As soon as the conversation
+closes — the user hangs up, or the model says goodbye — the device is freed immediately and, in
+the background, the model is handed a final **text-only** turn driven by the *close-out prompt*.
+The prompt is free-form and the turn keeps the **same tools the live session had** (memory, web
+search and any MCP servers already loaded via their `use_<server>` loaders), so the close-out turn
+can actually *finish work* the user asked for on their way out:
 
-The instruction given on that final turn has a built‑in default but can be overridden by
-pointing `CHATGPT_MEMORY_PROMPT_FILE` at a text file — handy for tuning what the model keeps.
+> *"Send an email to Alice saying I'll be ten minutes late — thanks, bye."* → the user hangs up →
+> in the background the model loads the Google server (if it hadn't already), drafts the mail and
+> sends it, then persists anything worth remembering — all without holding the line open.
+
+This is possible because each conversation holds an **MCP lease** that keeps its server
+connections open until the conversation is fully disposed, i.e. *after* the close-out turn — not
+at hang-up. The close-out turn **reuses the existing session tools** rather than sending its own
+list, so it adds no tool-schema tokens and is purely text-only (no audio is generated for the
+freed device). `end_conversation` stays available but simply reports that the call has already
+ended. (A conversation that drops because of a network error skips close-out, since there is no
+session left to ask.)
+
+The turn is capped so a stuck model can't keep a session open forever — 30 seconds by default,
+configurable with `CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS`.
+
+The close-out prompt is **required** when the feature is enabled — there is no built-in default,
+and the app refuses to start without `CHATGPT_CLOSE_OUT_PROMPT_FILE`. A typical prompt asks the
+model to carry out any deferred request and then save anything worth remembering for next time.

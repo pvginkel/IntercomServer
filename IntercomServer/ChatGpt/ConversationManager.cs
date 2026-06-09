@@ -62,12 +62,10 @@ internal sealed class ConversationManager(
         if (!_conversations.TryAdd(device.DeviceId, conversation))
         {
             Logger.Warning("Device {Device} is already in a ChatGPT conversation.", device.DeviceId);
+            // The conversation already took its MCP lease in the constructor; dispose it to release.
+            conversation.Dispose();
             return false;
         }
-
-        // Keep MCP connections alive for the duration of this conversation; they are shared
-        // with any other conversations running concurrently and closed when the last ends.
-        mcp.BeginConversation();
 
         try
         {
@@ -80,7 +78,6 @@ internal sealed class ConversationManager(
             Logger.Error(ex, "Failed to start ChatGPT conversation with device {Device}", device.DeviceId);
             _conversations.TryRemove(device.DeviceId, out _);
             conversation.Dispose();
-            mcp.EndConversation();
             return false;
         }
     }
@@ -98,11 +95,11 @@ internal sealed class ConversationManager(
 
     // Raised once a conversation's live phase ends (hang-up, model goodbye, error or disconnect).
     // The device is freed immediately via SessionEnded; the conversation itself is handed to the
-    // closer, which gives the model a final memory-flush turn and then disposes it.
+    // closer, which gives the model a final close-out turn and then disposes it. The conversation
+    // keeps its MCP lease until that disposal, so MCP tools stay callable during close-out.
     private void OnConversationClosing(Conversation conversation)
     {
         _conversations.TryRemove(conversation.Device.DeviceId, out _);
-        mcp.EndConversation();
 
         SessionEnded?.Invoke(this, conversation.Device);
 
