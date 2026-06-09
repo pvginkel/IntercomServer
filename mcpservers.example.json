@@ -2,11 +2,13 @@
   "servers": [
     {
       "name": "home",
-      "url": "http://homeassistant.local:8123/mcp/"
+      "url": "http://homeassistant.local:8123/mcp/",
+      "description": "Home Assistant: control lights, climate, scenes and read sensors around the house."
     },
     {
-      "name": "notes",
-      "url": "http://10.0.0.5:9000/mcp"
+      "name": "google",
+      "url": "http://10.0.0.5:9000/mcp",
+      "description": "Google Workspace: Gmail, Calendar, Contacts, Drive and Tasks."
     }
   ]
 }

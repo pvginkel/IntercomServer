@@ -70,11 +70,13 @@ Adding an MCP server is a **config change only — no code**:
      "servers": [
        {
          "name": "home",
-         "url": "http://homeassistant.local:8123/mcp/"
+         "url": "http://homeassistant.local:8123/mcp/",
+         "description": "Home Assistant: control lights, climate, scenes and read sensors."
        },
        {
-         "name": "notes",
-         "url": "http://10.0.0.5:9000/mcp"
+         "name": "google",
+         "url": "http://10.0.0.5:9000/mcp",
+         "description": "Google Workspace: Gmail, Calendar, Contacts, Drive and Tasks."
        }
      ]
    }
@@ -84,6 +86,7 @@ Adding an MCP server is a **config change only — no code**:
    | --- | --- | --- |
    | `name` | yes | A short label, unique per server. Used to namespace its tools **and** as the join key to its auth token (see below). |
    | `url` | yes | The MCP server's HTTP endpoint (Streamable HTTP or SSE — auto‑detected). |
+   | `description` | no | What the server is for. Shown to the model on the server's `use_<name>` loader so it knows when to load it (see *On‑demand tool loading* below). **Strongly recommended for large servers** — with it absent the model only has the `name` to go on. |
 
    **Authentication is supplied from the environment, not this file.** For each server,
    the app looks up an environment variable named `MCP_TOKEN_<NAME>`, where `<NAME>` is the
@@ -98,13 +101,31 @@ Adding an MCP server is a **config change only — no code**:
 
    ```
    Registered MCP tool home_toggle_light (home -> toggle_light)
-   Registered 7 MCP tool(s) across 2 server(s).
+   Registered 134 MCP tool(s) across 5 server(s); exposed as 5 on-demand loader(s).
    ```
 
 3. That's it. The model can now call those tools during a conversation. Each tool
    is exposed to the model as `{name}_{tool}` (sanitised to letters/digits/`_`/`-`,
    truncated to 64 characters) so two servers can expose tools with the same name
    without colliding.
+
+### On‑demand tool loading
+
+Tool **definitions** (name, description, JSON schema) cost context tokens on every turn, and a
+realtime voice session re‑pays that cost continually. With hundreds of tools across several
+servers that baseline becomes large, so MCP tools are **not** handed to the model up front.
+
+Instead, each server is exposed as a single **`use_<name>`** loader tool (so `home` →
+`use_home`). The model reads the loader's description, and when it decides it needs that server
+it calls the loader. The server then adds *that one server's* actual tools to the live session
+(via a realtime `session.update`), and the model calls them on its next turn. Only the always‑on
+tools (`end_conversation`, `web_search`, the memory tools) and the per‑server loaders are present
+at the start of a conversation; a server's real tools enter the session only once it is loaded,
+and stay loaded for the rest of that conversation.
+
+The trade‑off is **one extra round‑trip** the first time each server is used — noticeable as a
+short pause in a spoken conversation — in exchange for a much smaller, cheaper baseline. This is
+why a per‑server **`description`** matters: it is all the model sees when choosing what to load.
 
 ### Notes & limitations
 

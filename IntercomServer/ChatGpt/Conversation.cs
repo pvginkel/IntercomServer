@@ -71,6 +71,16 @@ internal sealed class Conversation
 
     private RealtimeSessionClient? _session;
 
+    // Names of the MCP servers whose tools have been loaded into the live session via a
+    // use_<server> selector call. Starts empty (only the selectors are exposed) and grows as the
+    // model asks for servers. Touched only from the receive loop (and once at startup, before it
+    // begins consuming), so it needs no locking.
+    private readonly HashSet<string> _enabledServers = new();
+
+    // The system prompt, resolved once at session start. Cached so re-issuing the session
+    // configuration to add tools (EnableServerAsync) does not re-substitute {NOW}/{MEMORIES}.
+    private string _instructions = "";
+
     // Lifecycle: Active while bridging audio, Closing during the final memory-flush turn,
     // Disposed once torn down. Guarded by _stateLock.
     private enum State
@@ -131,6 +141,7 @@ internal sealed class Conversation
             cancellationToken: _cts.Token
         );
         _session = session;
+        _instructions = BuildInstructions();
 
         CreateDebugWriters();
 
@@ -493,6 +504,36 @@ internal sealed class Conversation
             return;
         }
 
+        if (_mcp.TryResolveSelector(name, out var serverName))
+        {
+            string selectorOutput;
+            if (_enabledServers.Contains(serverName))
+            {
+                selectorOutput = $"The '{serverName}' tools are already loaded.";
+            }
+            else
+            {
+                Logger.Information(
+                    "Loading MCP server {Server} for {Device} (selector {Tool}).",
+                    serverName,
+                    Device.DeviceId,
+                    name
+                );
+                await EnableServerAsync(serverName, cancellationToken);
+                selectorOutput =
+                    $"Loaded the '{serverName}' tools. They are now available — call the one you need.";
+            }
+
+            await SendGuardedAsync(
+                () =>
+                    session.AddItemAsync(
+                        new RealtimeFunctionCallOutputItem(functionCall.CallId, selectorOutput),
+                        cancellationToken
+                    )
+            );
+            return;
+        }
+
         var arguments = functionCall.FunctionArguments?.ToString() ?? "{}";
         Logger.Information("Model called tool {Tool} with {Arguments}", name, arguments);
 
@@ -804,7 +845,7 @@ internal sealed class Conversation
     {
         var options = new RealtimeConversationSessionOptions
         {
-            Instructions = BuildInstructions(),
+            Instructions = _instructions,
             AudioOptions = new RealtimeConversationSessionAudioOptions
             {
                 InputAudioOptions = new RealtimeConversationSessionInputAudioOptions
@@ -826,7 +867,21 @@ internal sealed class Conversation
 
         options.OutputModalities.Add(RealtimeOutputModality.Audio);
 
-        foreach (var tool in _mcp.GetRealtimeTools())
+        AddTools(options);
+
+        return options;
+    }
+
+    // Populates the session's tool list: the always-present tools plus one use_<server> selector
+    // per MCP server, plus the actual tools of any server already loaded this conversation. MCP
+    // tools are loaded on demand (see EnableServerAsync) to keep the baseline context small.
+    private void AddTools(RealtimeConversationSessionOptions options)
+    {
+        foreach (var tool in _mcp.GetServerSelectorTools())
+            options.Tools.Add(tool);
+
+        foreach (var server in _enabledServers)
+        foreach (var tool in _mcp.GetServerTools(server))
             options.Tools.Add(tool);
 
         foreach (var tool in _memory.GetRealtimeTools())
@@ -834,8 +889,21 @@ internal sealed class Conversation
 
         options.Tools.Add(BuildWebSearchTool());
         options.Tools.Add(BuildEndConversationTool());
+    }
 
-        return options;
+    // Loads a server's tools into the live session in response to a use_<server> selector call, by
+    // re-issuing the session configuration (a session.update) with the now-larger tool set. The
+    // model sees the new tools on its next response — driven by the turn continuation in
+    // HandleResponseDone after the calling response completes.
+    private async Task EnableServerAsync(string serverName, CancellationToken cancellationToken)
+    {
+        _enabledServers.Add(serverName);
+
+        var session = _session;
+        if (session != null)
+            await SendGuardedAsync(
+                () => session.ConfigureConversationSessionAsync(BuildSessionOptions(), cancellationToken)
+            );
     }
 
     private static RealtimeFunctionTool BuildWebSearchTool() =>
