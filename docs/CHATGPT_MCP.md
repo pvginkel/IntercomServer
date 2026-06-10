@@ -87,7 +87,7 @@ Adding an MCP server is a **config change only — no code**:
    | --- | --- | --- |
    | `name` | yes | A short label, unique per server. Used to namespace its tools **and** as the join key to its auth token (see below). |
    | `url` | yes | The MCP server's HTTP endpoint (Streamable HTTP or SSE — auto‑detected). |
-   | `description` | no | What the server is for. Shown to the model on the server's `use_<name>` loader so it knows when to load it (see *On‑demand tool loading* below). **Strongly recommended for large servers** — with it absent the model only has the `name` to go on. |
+   | `description` | no | What the server is for. Shown to the model on the server's `use_<name>` loader (alongside the server's tool names) so it knows when to load it (see *On‑demand tool loading* below). **Strongly recommended for large servers** — with it absent the model has only the `name` and the bare tool names to go on. |
 
    **Authentication is supplied from the environment, not this file.** For each server,
    the app looks up an environment variable named `MCP_TOKEN_<NAME>`, where `<NAME>` is the
@@ -117,7 +117,9 @@ realtime voice session re‑pays that cost continually. With hundreds of tools a
 servers that baseline becomes large, so MCP tools are **not** handed to the model up front.
 
 Instead, each server is exposed as a single **`use_<name>`** loader tool (so `home` →
-`use_home`). The model reads the loader's description, and when it decides it needs that server
+`use_home`). The loader's description carries the server's `description` **and the names of all the
+tools it exposes** (names only — not their schemas, which is the cost on‑demand loading exists to
+defer), so the model can route on the concrete capabilities. When it decides it needs that server
 it calls the loader. The server then adds *that one server's* actual tools to the live session
 (via a realtime `session.update`), and the model calls them on its next turn. Only the always‑on
 tools (`end_conversation`, `web_search`, the memory tools) and the per‑server loaders are present
@@ -125,8 +127,9 @@ at the start of a conversation; a server's real tools enter the session only onc
 and stay loaded for the rest of that conversation.
 
 The trade‑off is **one extra round‑trip** the first time each server is used — noticeable as a
-short pause in a spoken conversation — in exchange for a much smaller, cheaper baseline. This is
-why a per‑server **`description`** matters: it is all the model sees when choosing what to load.
+short pause in a spoken conversation — in exchange for a much smaller, cheaper baseline. A
+per‑server **`description`** still matters: together with the listed tool names it is what the
+model sees when choosing what to load.
 
 ### Notes & limitations
 

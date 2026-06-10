@@ -177,7 +177,7 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
         var entry = new ServerEntry(
             server.Name,
             selectorName,
-            BuildSelectorDescription(server, serverTools.Count),
+            BuildSelectorDescription(server, serverTools),
             serverTools
         );
         _servers.Add(entry);
@@ -186,15 +186,23 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
 
     // The description the model sees for a server's "use_<server>" loader. A per-server
     // description in the config makes routing far more reliable than the bare name; when it is
-    // absent we fall back to the name itself.
-    private static string BuildSelectorDescription(McpServerConfig server, int toolCount)
+    // absent we fall back to the name itself. We also list the server's tool names so the model can
+    // route on the concrete capabilities, not just the prose summary. Only the names are listed —
+    // not their schemas, whose token cost is exactly what on-demand loading exists to defer.
+    private static string BuildSelectorDescription(
+        McpServerConfig server,
+        IReadOnlyList<RegisteredTool> tools
+    )
     {
         var what = string.IsNullOrWhiteSpace(server.Description)
             ? $"the '{server.Name}' integration"
             : server.Description!.Trim();
 
+        var names = string.Join(", ", tools.Select(t => t.ToolName));
+
         return $"Load the tools for {what}. You must call this before you can use any "
-            + $"'{server.Name}' tools; calling it makes its {toolCount} tool(s) available to call.";
+            + $"'{server.Name}' tools; calling it makes these tool(s) available to "
+            + $"call: {names}.";
     }
 
     /// <summary>
