@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+## Git workflow
+
+Commit as you go along, directly on `main` — no topic branches. Make a commit per logical
+change rather than batching a session's work into one.
+
 ## Federated architecture model
 
 We take part in a federated Architecture-as-Code model. The architecture for this repository is maintained in `docs/architecture/architecture.yaml`. Whenever a change is made in this repo that could impact an Enterprise Architecture / ArchiMate model modeling everything owned by this repo, nudge the user to spawn the `update-architecture` agent. The agent is incremental, so it's not a hard requirement that it runs on every change. Nudge a bit harder when significant changes are made (new managed host, new daemon, removed service, renamed external identity). When you are performing work unattended, feel free to invoke the agent yourself.
