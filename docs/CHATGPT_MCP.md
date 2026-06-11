@@ -30,17 +30,17 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_MODEL` | no | `gpt-realtime` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
 | `CHATGPT_WEB_SEARCH_MODEL` | no | `gpt-5.5` | Model used by the built-in `web_search` tool (see below). |
-| `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}` and `{MEMORIES}` placeholders (see below). |
-| `CHATGPT_CLOSE_OUT_PROMPT_FILE` | **yes** (when enabled) | — | Path to a file containing the free‑form instruction for the end‑of‑conversation **close‑out** turn (see *Close‑out turn* below); read at startup. **Required** whenever `OPENAI_API_KEY` is set — there is no built‑in default, and the app refuses to start without it. |
-| `CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS` | no | `30` | Hard cap on the background close‑out turn (see *Close‑out turn* below). Generous by default because close‑out may make MCP tool calls (e.g. sending an email). Must be greater than zero. |
-| `CHATGPT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
+| `ASSISTANT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}` and `{MEMORIES}` placeholders (see below). |
+| `ASSISTANT_CLOSE_OUT_PROMPT_FILE` | **yes** (when enabled) | — | Path to a file containing the free‑form instruction for the end‑of‑conversation **close‑out** turn (see *Close‑out turn* below); read at startup. **Required** whenever `OPENAI_API_KEY` is set — there is no built‑in default, and the app refuses to start without it. |
+| `ASSISTANT_CLOSE_OUT_TIMEOUT_SECONDS` | no | `30` | Hard cap on the background close‑out turn (see *Close‑out turn* below). Generous by default because close‑out may make MCP tool calls (e.g. sending an email). Must be greater than zero. |
+| `ASSISTANT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
 | `DATA_DIR` | no | `data` | Root folder for the server's persistent data. The model's memories live in a `memories/` sub-folder (see *Memory* below). |
-| `CHATGPT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the 16 kHz stream sent to the device). |
+| `ASSISTANT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the 16 kHz stream sent to the device). |
 
 The system prompt may include the placeholder **`{NOW}`**, which is replaced at the start of
 each conversation with the current date and time as a natural, culture-specific long
-date + time (with `CHATGPT_LOCALE=nl-NL`, a Dutch-formatted date like *"… 7 juni 2026 15:45"*).
+date + time (with `ASSISTANT_LOCALE=nl-NL`, a Dutch-formatted date like *"… 7 juni 2026 15:45"*).
 It is substituted per conversation, so the time is always current rather than frozen at startup.
 
 The prompt may also include **`{MEMORIES}`**, replaced (per conversation) with a Markdown
@@ -196,8 +196,8 @@ ended. (A conversation that drops because of a network error skips close-out, si
 session left to ask.)
 
 The turn is capped so a stuck model can't keep a session open forever — 30 seconds by default,
-configurable with `CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS`.
+configurable with `ASSISTANT_CLOSE_OUT_TIMEOUT_SECONDS`.
 
 The close-out prompt is **required** when the feature is enabled — there is no built-in default,
-and the app refuses to start without `CHATGPT_CLOSE_OUT_PROMPT_FILE`. A typical prompt asks the
+and the app refuses to start without `ASSISTANT_CLOSE_OUT_PROMPT_FILE`. A typical prompt asks the
 model to carry out any deferred request and then save anything worth remembering for next time.

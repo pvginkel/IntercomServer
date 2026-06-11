@@ -1,4 +1,4 @@
-﻿using IntercomServer.ChatGpt;
+﻿using IntercomServer.AIAssistant;
 using IntercomServer.Utils;
 using MQTTnet;
 using Serilog;
@@ -85,7 +85,7 @@ internal class StateManager
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "Failed to end ChatGPT conversation");
+            Logger.Error(ex, "Failed to end assistant conversation");
         }
     }
 
@@ -94,7 +94,7 @@ internal class StateManager
         _callingAlarm?.Dispose();
         _callingAlarm = null;
 
-        // A device that is in a ChatGPT conversation uses its button only to control that
+        // A device that is in an assistant conversation uses its button only to control that
         // conversation: a click hangs up. While chatting it is excluded from incoming
         // calls (see RequestCall), but other devices are unaffected — they can still call
         // each other and start their own conversations.
@@ -134,7 +134,7 @@ internal class StateManager
 
     private async Task StartChat(Device device)
     {
-        Logger.Information("Device {Device} started a ChatGPT conversation", device.DeviceId);
+        Logger.Information("Device {Device} started an assistant conversation", device.DeviceId);
 
         var started = false;
 
@@ -149,7 +149,7 @@ internal class StateManager
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "Failed to start ChatGPT conversation for device {Device}", device.DeviceId);
+            Logger.Error(ex, "Failed to start assistant conversation for device {Device}", device.DeviceId);
         }
 
         // On a failed start nothing will raise SessionEnded, so undo the device control
@@ -168,7 +168,7 @@ internal class StateManager
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "Failed to reset device {Device} after ChatGPT", device.DeviceId);
+            Logger.Error(ex, "Failed to reset device {Device} after a conversation", device.DeviceId);
         }
     }
 
@@ -176,7 +176,7 @@ internal class StateManager
     {
         Logger.Information("Device {Device} requested a call", device.DeviceId);
 
-        // A device that is in a ChatGPT conversation is busy and is not rung.
+        // A device that is in an assistant conversation is busy and is not rung.
         _ringing.Clear();
         _ringing.AddRange(
             _devices.GetAllEnabled().Where(p => p != device && !_conversation.IsChatting(p))

@@ -1,20 +1,16 @@
-// RealtimeFunctionTool comes from the experimental OpenAI Realtime API (OPENAI002).
-#pragma warning disable OPENAI002
-
 using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
-using OpenAI.Realtime;
 using Serilog;
 
-namespace IntercomServer.ChatGpt;
+namespace IntercomServer.AIAssistant;
 
 /// <summary>
 /// Discovers the tools exposed by the configured remote (HTTP/SSE) MCP servers and exposes
-/// them to the OpenAI Realtime session. Tool calls coming back from the model are executed
-/// here against the owning MCP server — the servers themselves are never exposed to OpenAI
-/// or the public internet.
+/// them to the assistant session. Tool calls coming back from the model are executed
+/// here against the owning MCP server — the servers themselves are never exposed to the AI
+/// provider or the public internet.
 ///
 /// Tools are loaded <b>on demand</b> to keep the session's context small: rather than handing
 /// the model every tool up front (hundreds, once a few servers are configured), each server is
@@ -34,7 +30,7 @@ namespace IntercomServer.ChatGpt;
 /// To add a new MCP server, drop an entry in the JSON config file (see docs/CHATGPT_MCP.md).
 /// No code changes are required.
 /// </summary>
-internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
+internal sealed class McpToolRegistry(AssistantConfiguration configuration)
 {
     private static readonly ILogger Logger = Log.ForContext<McpToolRegistry>();
 
@@ -79,7 +75,7 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
         if (!File.Exists(path))
         {
             Logger.Information(
-                "No MCP configuration file at {Path}; ChatGPT will run without MCP tools.",
+                "No MCP configuration file at {Path}; the assistant will run without MCP tools.",
                 path
             );
             return;
@@ -246,15 +242,15 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
     /// Builds the one-per-server <c>use_&lt;server&gt;</c> selector tools that are always present in a
     /// session. Calling one loads that server's actual tools (see <see cref="GetServerTools"/>).
     /// </summary>
-    internal IEnumerable<RealtimeFunctionTool> GetServerSelectorTools()
+    internal IEnumerable<AssistantTool> GetServerSelectorTools()
     {
         foreach (var entry in _servers)
         {
-            yield return new RealtimeFunctionTool(entry.SelectorName)
-            {
-                FunctionDescription = entry.SelectorDescription,
-                FunctionParameters = NoParameters,
-            };
+            yield return new AssistantTool(
+                entry.SelectorName,
+                entry.SelectorDescription,
+                NoParameters
+            );
         }
     }
 
@@ -275,22 +271,28 @@ internal sealed class McpToolRegistry(ChatGptConfiguration configuration)
     }
 
     /// <summary>Builds the function tool definitions for the tools of a single (loaded) server.</summary>
-    internal IEnumerable<RealtimeFunctionTool> GetServerTools(string serverName)
+    internal IEnumerable<AssistantTool> GetServerTools(string serverName)
     {
         if (!_serversByName.TryGetValue(serverName, out var entry))
             yield break;
 
         foreach (var registered in entry.Tools)
         {
-            yield return new RealtimeFunctionTool(
-                MakeFunctionName(registered.Server.Name, registered.ToolName)
-            )
-            {
-                FunctionDescription = registered.Description,
-                FunctionParameters = registered.Parameters,
-            };
+            yield return new AssistantTool(
+                MakeFunctionName(registered.Server.Name, registered.ToolName),
+                registered.Description,
+                registered.Parameters
+            );
         }
     }
+
+    /// <summary>
+    /// Builds the function tool definitions for every server's tools at once, for sessions that
+    /// cannot add tools mid-conversation and so expose everything up front instead of using the
+    /// <c>use_&lt;server&gt;</c> selectors.
+    /// </summary>
+    internal IEnumerable<AssistantTool> GetAllServerTools() =>
+        _servers.SelectMany(entry => GetServerTools(entry.Name));
 
     /// <summary>Invokes a registered MCP tool and returns its textual output.</summary>
     internal async Task<string> CallAsync(
@@ -439,7 +441,7 @@ internal sealed class McpLease(McpToolRegistry registry) : IDisposable
     private int _disposed;
 
     /// <summary>The per-server <c>use_&lt;server&gt;</c> selector tools, always present in a session.</summary>
-    public IEnumerable<RealtimeFunctionTool> GetServerSelectorTools() =>
+    public IEnumerable<AssistantTool> GetServerSelectorTools() =>
         registry.GetServerSelectorTools();
 
     /// <summary>Maps a selector tool name back to its server, or false when it is not a selector.</summary>
@@ -447,8 +449,11 @@ internal sealed class McpLease(McpToolRegistry registry) : IDisposable
         registry.TryResolveSelector(functionName, out serverName);
 
     /// <summary>The function tool definitions for the tools of a single (loaded) server.</summary>
-    public IEnumerable<RealtimeFunctionTool> GetServerTools(string serverName) =>
+    public IEnumerable<AssistantTool> GetServerTools(string serverName) =>
         registry.GetServerTools(serverName);
+
+    /// <summary>Every server's tools at once, for sessions that cannot add tools mid-conversation.</summary>
+    public IEnumerable<AssistantTool> GetAllServerTools() => registry.GetAllServerTools();
 
     /// <summary>Invokes a registered MCP tool and returns its textual output.</summary>
     public Task<string> CallAsync(

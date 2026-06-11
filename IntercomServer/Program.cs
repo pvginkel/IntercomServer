@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using IntercomServer;
-using IntercomServer.ChatGpt;
+using IntercomServer.AIAssistant;
+using IntercomServer.AIAssistant.ChatGpt;
 using IntercomServer.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -29,14 +30,6 @@ static string ResolveFileOrDefault(string fileEnvVar, string @default)
     }
 }
 
-// Fails fast on a fatal misconfiguration (see ChatGptConfiguration.Validate) before the config is
-// registered, so the host never starts in a broken state.
-static ChatGptConfiguration Validated(ChatGptConfiguration configuration)
-{
-    configuration.Validate();
-    return configuration;
-}
-
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .WriteTo.Console()
@@ -56,55 +49,62 @@ var builder = new HostBuilder().ConfigureServices(
                 Password = Env("MQTT_PASSWORD")
             }
         );
-        services.AddSingleton(
-            Validated(new ChatGptConfiguration
-            {
-                ApiKey = Env("OPENAI_API_KEY"),
-                Model = Env("CHATGPT_MODEL") is { Length: > 0 } model ? model : "gpt-realtime-2",
-                WebSearchModel = Env("CHATGPT_WEB_SEARCH_MODEL") is { Length: > 0 } searchModel
-                    ? searchModel
-                    : "gpt-5.5",
-                Voice = Env("CHATGPT_VOICE") is { Length: > 0 } voice ? voice : "marin",
-                Locale = Env("CHATGPT_LOCALE"),
-                Instructions = ResolveFileOrDefault(
-                    "CHATGPT_INSTRUCTIONS_FILE",
-                    new ChatGptConfiguration().Instructions
-                ),
-                // Required when the feature is enabled; ChatGptConfiguration.Validate enforces it.
-                CloseOutPrompt = ResolveFileOrDefault("CHATGPT_CLOSE_OUT_PROMPT_FILE", ""),
-                CloseOutTimeoutSeconds = int.TryParse(
-                    Env("CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS"),
-                    out var closeOutTimeout
-                )
-                    ? closeOutTimeout
-                    : new ChatGptConfiguration().CloseOutTimeoutSeconds,
-                McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
-                    ? mcpFile
-                    : "mcpservers.json",
-                DataDirectory = Env("DATA_DIR") is { Length: > 0 } dataDir ? dataDir : "data",
-                DebugAudioDirectory = Env("CHATGPT_DEBUG_AUDIO_DIR"),
-                MicGateThreshold = double.TryParse(
-                    Env("CHATGPT_MIC_GATE_THRESHOLD"),
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out var micGate
-                )
-                    ? micGate
-                    : new ChatGptConfiguration().MicGateThreshold,
-                MicGateAttackMs = int.TryParse(Env("CHATGPT_MIC_GATE_ATTACK_MS"), out var micAttack)
-                    ? micAttack
-                    : new ChatGptConfiguration().MicGateAttackMs,
-                MicGateHoldMs = int.TryParse(Env("CHATGPT_MIC_GATE_HOLD_MS"), out var micHold)
-                    ? micHold
-                    : new ChatGptConfiguration().MicGateHoldMs,
-                MicGatePrerollMs = int.TryParse(
-                    Env("CHATGPT_MIC_GATE_PREROLL_MS"),
-                    out var micPreroll
-                )
-                    ? micPreroll
-                    : new ChatGptConfiguration().MicGatePrerollMs,
-            })
-        );
+        var chatGptConfiguration = new ChatGptConfiguration
+        {
+            ApiKey = Env("OPENAI_API_KEY"),
+            Model = Env("CHATGPT_MODEL") is { Length: > 0 } model ? model : "gpt-realtime-2",
+            WebSearchModel = Env("CHATGPT_WEB_SEARCH_MODEL") is { Length: > 0 } searchModel
+                ? searchModel
+                : "gpt-5.5",
+            Voice = Env("CHATGPT_VOICE") is { Length: > 0 } voice ? voice : "marin",
+        };
+        var assistantConfiguration = new AssistantConfiguration
+        {
+            Locale = Env("ASSISTANT_LOCALE"),
+            Instructions = ResolveFileOrDefault(
+                "ASSISTANT_INSTRUCTIONS_FILE",
+                new AssistantConfiguration().Instructions
+            ),
+            // Required when the feature is enabled; AssistantConfiguration.Validate enforces it.
+            CloseOutPrompt = ResolveFileOrDefault("ASSISTANT_CLOSE_OUT_PROMPT_FILE", ""),
+            CloseOutTimeoutSeconds = int.TryParse(
+                Env("ASSISTANT_CLOSE_OUT_TIMEOUT_SECONDS"),
+                out var closeOutTimeout
+            )
+                ? closeOutTimeout
+                : new AssistantConfiguration().CloseOutTimeoutSeconds,
+            McpConfigFile = Env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
+                ? mcpFile
+                : "mcpservers.json",
+            DataDirectory = Env("DATA_DIR") is { Length: > 0 } dataDir ? dataDir : "data",
+            DebugAudioDirectory = Env("ASSISTANT_DEBUG_AUDIO_DIR"),
+            MicGateThreshold = double.TryParse(
+                Env("ASSISTANT_MIC_GATE_THRESHOLD"),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var micGate
+            )
+                ? micGate
+                : new AssistantConfiguration().MicGateThreshold,
+            MicGateAttackMs = int.TryParse(Env("ASSISTANT_MIC_GATE_ATTACK_MS"), out var micAttack)
+                ? micAttack
+                : new AssistantConfiguration().MicGateAttackMs,
+            MicGateHoldMs = int.TryParse(Env("ASSISTANT_MIC_GATE_HOLD_MS"), out var micHold)
+                ? micHold
+                : new AssistantConfiguration().MicGateHoldMs,
+            MicGatePrerollMs = int.TryParse(
+                Env("ASSISTANT_MIC_GATE_PREROLL_MS"),
+                out var micPreroll
+            )
+                ? micPreroll
+                : new AssistantConfiguration().MicGatePrerollMs,
+        };
+
+        // Fails fast on a fatal misconfiguration before the host starts in a broken state.
+        assistantConfiguration.Validate(chatGptConfiguration.IsEnabled);
+
+        services.AddSingleton(chatGptConfiguration);
+        services.AddSingleton(assistantConfiguration);
         services.AddSingleton(
             new AudioServerConfiguration
             {
@@ -128,6 +128,7 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton<McpToolRegistry>();
         services.AddSingleton<WebSearchTool>();
         services.AddSingleton<MemoryStore>();
+        services.AddSingleton<IAssistantSessionFactory, ChatGptSessionFactory>();
         services.AddSingleton<ConversationCloser>();
         services.AddSingleton<ConversationManager>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());

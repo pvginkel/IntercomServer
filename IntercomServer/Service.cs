@@ -1,4 +1,4 @@
-﻿using IntercomServer.ChatGpt;
+﻿using IntercomServer.AIAssistant;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 
@@ -7,7 +7,7 @@ namespace IntercomServer;
 internal class Service(
     Server server,
     McpToolRegistry mcpToolRegistry,
-    ChatGptConfiguration chatGptConfiguration,
+    IAssistantSessionFactory assistantSessionFactory,
     AudioEndpointResolver audioEndpointResolver
 ) : IHostedService
 {
@@ -17,12 +17,12 @@ internal class Service(
     {
         await server.Connect();
 
-        if (chatGptConfiguration.IsEnabled)
+        if (assistantSessionFactory.IsEnabled)
         {
             try
             {
                 Logger.Information(
-                    "ChatGPT enabled; devices will stream audio to {Endpoint} "
+                    "AI assistant enabled; devices will stream audio to {Endpoint} "
                         + "(override with AUDIO_HOST if this is not reachable by the devices)",
                     audioEndpointResolver.Endpoint
                 );

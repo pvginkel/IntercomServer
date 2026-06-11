@@ -1,11 +1,7 @@
-// RealtimeFunctionTool comes from the experimental OpenAI Realtime API (OPENAI002).
-#pragma warning disable OPENAI002
-
 using System.Text.Json;
-using OpenAI.Realtime;
 using Serilog;
 
-namespace IntercomServer.ChatGpt;
+namespace IntercomServer.AIAssistant;
 
 /// <summary>
 /// A simple file-backed memory the model can manage during conversations. Each memory is a
@@ -17,7 +13,7 @@ namespace IntercomServer.ChatGpt;
 /// and <c>delete_memory</c>. Get/put/delete are by slug. The memories live in a
 /// <c>memories/</c> sub-folder of the configured data directory.
 /// </summary>
-internal sealed class MemoryStore(ChatGptConfiguration configuration)
+internal sealed class MemoryStore(AssistantConfiguration configuration)
 {
     public const string ListTool = "list_memories";
     public const string GetTool = "get_memory";
@@ -35,7 +31,7 @@ internal sealed class MemoryStore(ChatGptConfiguration configuration)
     public bool Handles(string toolName) =>
         toolName is ListTool or GetTool or PutTool or DeleteTool;
 
-    public IEnumerable<RealtimeFunctionTool> GetRealtimeTools()
+    public IEnumerable<AssistantTool> GetTools()
     {
         yield return Tool(
             ListTool,
@@ -63,12 +59,8 @@ internal sealed class MemoryStore(ChatGptConfiguration configuration)
         );
     }
 
-    private static RealtimeFunctionTool Tool(string name, string description, string parameters) =>
-        new(name)
-        {
-            FunctionDescription = description,
-            FunctionParameters = BinaryData.FromString(parameters),
-        };
+    private static AssistantTool Tool(string name, string description, string parameters) =>
+        new(name, description, BinaryData.FromString(parameters));
 
     public async Task<string> CallAsync(
         string toolName,

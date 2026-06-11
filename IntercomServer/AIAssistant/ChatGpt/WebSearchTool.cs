@@ -6,19 +6,30 @@ using System.Text.Json;
 using OpenAI.Responses;
 using Serilog;
 
-namespace IntercomServer.ChatGpt;
+namespace IntercomServer.AIAssistant.ChatGpt;
 
 /// <summary>
-/// Backs the realtime conversation's <c>web_search</c> function tool. When the model calls
+/// Backs the <c>web_search</c> function tool of the ChatGPT provider. When the model calls
 /// it, this runs a separate OpenAI Responses API request (a configurable model, default
 /// gpt-5.5) with the hosted web-search tool enabled, and returns the answer text to be fed
-/// back into the conversation.
+/// back into the conversation. Handled inside <see cref="ChatGptSession"/>; other providers
+/// bring their own web search (e.g. Gemini's native Google Search grounding).
 /// </summary>
 internal sealed class WebSearchTool(ChatGptConfiguration configuration)
 {
     public const string ToolName = "web_search";
 
     private static readonly ILogger Logger = Log.ForContext<WebSearchTool>();
+
+    public static AssistantTool GetTool() =>
+        new(
+            ToolName,
+            "Search the web for current or factual information and return a concise answer. "
+                + "Use this for recent events, or anything you are unsure about.",
+            BinaryData.FromString(
+                """{"type":"object","properties":{"query":{"type":"string","description":"What to search the web for."}},"required":["query"],"additionalProperties":false}"""
+            )
+        );
 
     public async Task<string> SearchAsync(string argumentsJson, CancellationToken cancellationToken)
     {

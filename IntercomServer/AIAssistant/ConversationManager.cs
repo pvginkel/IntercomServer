@@ -2,18 +2,19 @@ using System.Collections.Concurrent;
 using IntercomServer.Utils;
 using Serilog;
 
-namespace IntercomServer.ChatGpt;
+namespace IntercomServer.AIAssistant;
 
 /// <summary>
-/// Manages the set of concurrent ChatGPT conversations (one per device). Each device can
+/// Manages the set of concurrent AI assistant conversations (one per device). Each device can
 /// hold its own conversation independently; conversations are not exclusive with each
-/// other or with calls. This class owns only the OpenAI bridge — device control (LEDs,
-/// recording, audio endpoints) lives in <see cref="StateManager"/>.
+/// other or with calls. This class owns only the assistant bridge — device control (LEDs,
+/// recording, audio endpoints) lives in <see cref="StateManager"/>. Which AI provider backs
+/// the conversations is decided by the injected <see cref="IAssistantSessionFactory"/>.
 /// </summary>
 internal sealed class ConversationManager(
-    ChatGptConfiguration configuration,
+    AssistantConfiguration configuration,
+    IAssistantSessionFactory sessionFactory,
     McpToolRegistry mcp,
-    WebSearchTool webSearch,
     MemoryStore memory,
     AudioSender audioSender,
     UdpAudioServer audioServer,
@@ -33,16 +34,16 @@ internal sealed class ConversationManager(
     /// </summary>
     public async Task<bool> StartAsync(Device device)
     {
-        if (!configuration.IsEnabled)
+        if (!sessionFactory.IsEnabled)
         {
-            Logger.Warning("ChatGPT conversation requested but no OpenAI API key is configured.");
+            Logger.Warning("Assistant conversation requested but no AI provider is configured.");
             return false;
         }
 
         if (device.Configuration?.Endpoint == null)
         {
             Logger.Warning(
-                "Cannot start ChatGPT conversation: device {Device} has no audio endpoint.",
+                "Cannot start assistant conversation: device {Device} has no audio endpoint.",
                 device.DeviceId
             );
             return false;
@@ -51,8 +52,8 @@ internal sealed class ConversationManager(
         var conversation = new Conversation(
             device,
             configuration,
+            sessionFactory,
             mcp,
-            webSearch,
             memory,
             audioSender,
             audioServer,
@@ -61,7 +62,10 @@ internal sealed class ConversationManager(
 
         if (!_conversations.TryAdd(device.DeviceId, conversation))
         {
-            Logger.Warning("Device {Device} is already in a ChatGPT conversation.", device.DeviceId);
+            Logger.Warning(
+                "Device {Device} is already in an assistant conversation.",
+                device.DeviceId
+            );
             // The conversation already took its MCP lease in the constructor; dispose it to release.
             conversation.Dispose();
             return false;
@@ -70,12 +74,19 @@ internal sealed class ConversationManager(
         try
         {
             await conversation.StartAsync();
-            Logger.Information("Started ChatGPT conversation with device {Device}", device.DeviceId);
+            Logger.Information(
+                "Started assistant conversation with device {Device}",
+                device.DeviceId
+            );
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "Failed to start ChatGPT conversation with device {Device}", device.DeviceId);
+            Logger.Error(
+                ex,
+                "Failed to start assistant conversation with device {Device}",
+                device.DeviceId
+            );
             _conversations.TryRemove(device.DeviceId, out _);
             conversation.Dispose();
             return false;

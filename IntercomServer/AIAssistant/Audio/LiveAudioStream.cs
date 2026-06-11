@@ -1,4 +1,4 @@
-namespace IntercomServer.ChatGpt.Audio;
+namespace IntercomServer.AIAssistant.Audio;
 
 /// <summary>
 /// A read-only <see cref="Stream"/> fed live with PCM audio, with a small jitter buffer.

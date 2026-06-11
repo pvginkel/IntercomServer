@@ -1,32 +1,18 @@
-namespace IntercomServer.ChatGpt;
+namespace IntercomServer.AIAssistant;
 
 /// <summary>
-/// Configuration for the ChatGPT (OpenAI Realtime API) integration. Populated
-/// from environment variables in <c>Program.cs</c>, mirroring how
-/// <see cref="ServerConfiguration"/> is loaded.
+/// Provider-neutral configuration for the AI assistant feature. Populated from environment
+/// variables in <c>Program.cs</c>, mirroring how <see cref="ServerConfiguration"/> is loaded.
+/// Provider-specific settings (API key, model, voice) live with the provider, e.g.
+/// <see cref="ChatGpt.ChatGptConfiguration"/>.
 /// </summary>
-internal class ChatGptConfiguration
+internal class AssistantConfiguration
 {
-    /// <summary>OpenAI API key. When empty, the ChatGPT feature is disabled.</summary>
-    public string? ApiKey { get; init; }
-
-    /// <summary>Realtime model name, e.g. <c>gpt-realtime</c> or <c>gpt-realtime-2</c>.</summary>
-    public string Model { get; init; } = "gpt-realtime";
-
-    /// <summary>Model used for the <c>web_search</c> tool's Responses API call.</summary>
-    public string WebSearchModel { get; init; } = "gpt-5.5";
-
     /// <summary>
     /// Culture used to format dynamic values substituted into the instructions, such as the
     /// <c>{NOW}</c> placeholder (e.g. <c>nl-NL</c>). When empty, the host's current culture.
     /// </summary>
     public string? Locale { get; init; }
-
-    /// <summary>
-    /// Voice name. One of the OpenAI realtime voices (alloy, ash, ballad, cedar,
-    /// coral, echo, marin, sage, shimmer, verse).
-    /// </summary>
-    public string Voice { get; init; } = "marin";
 
     /// <summary>System instructions / persona handed to the model on session start.</summary>
     public string Instructions { get; init; } =
@@ -39,7 +25,7 @@ internal class ChatGptConfiguration
     /// ends (the "close-out" turn). It can say anything: persist memory, finish a deferred request
     /// such as sending an email, etc. There is deliberately no built-in default — it is
     /// <b>required</b> when the feature is enabled (see <see cref="Validate"/>) and supplied via
-    /// <c>CHATGPT_CLOSE_OUT_PROMPT_FILE</c>.
+    /// <c>ASSISTANT_CLOSE_OUT_PROMPT_FILE</c>.
     /// </summary>
     public string CloseOutPrompt { get; init; } = "";
 
@@ -63,7 +49,7 @@ internal class ChatGptConfiguration
 
     /// <summary>
     /// Debugging aid: when set, the conversation's audio is also written to WAV files in this
-    /// directory — the raw 24 kHz stream received from OpenAI, the 16 kHz stream sent to the
+    /// directory — the raw stream received from the provider, the 16 kHz stream sent to the
     /// device, and the raw 16 kHz device microphone. Leave empty to disable.
     /// </summary>
     public string? DebugAudioDirectory { get; init; }
@@ -84,9 +70,9 @@ internal class ChatGptConfiguration
     public int MicGateAttackMs { get; init; } = 60;
 
     /// <summary>
-    /// Safety backstop, in milliseconds: the gate normally closes when the server's VAD reports
+    /// Safety backstop, in milliseconds: the gate normally closes when the provider's VAD reports
     /// the user's turn ended, but if that event never arrives it force-closes after this much
-    /// continuous quiet. Keep it comfortably longer than the server's silence window. A negative
+    /// continuous quiet. Keep it comfortably longer than the provider's silence window. A negative
     /// value disables the backstop entirely, depending solely on the VAD speech-stopped event.
     /// Only relevant when the gate is enabled.
     /// </summary>
@@ -99,28 +85,28 @@ internal class ChatGptConfiguration
     /// </summary>
     public int MicGatePrerollMs { get; init; } = 80;
 
-    public bool IsEnabled => !string.IsNullOrEmpty(ApiKey);
-
     /// <summary>
     /// Validates the configuration at startup, throwing on a fatal misconfiguration so the app
-    /// fails fast rather than misbehaving at runtime. When the feature is enabled a close-out
-    /// prompt is mandatory: the model is given a final close-out turn at hang-up (which may finish
-    /// deferred work such as sending an email), and silently skipping it would be surprising.
+    /// fails fast rather than misbehaving at runtime. <paramref name="enabled"/> is whether an AI
+    /// provider is configured (<see cref="IAssistantSessionFactory.IsEnabled"/>); when it is, a
+    /// close-out prompt is mandatory: the model is given a final close-out turn at hang-up (which
+    /// may finish deferred work such as sending an email), and silently skipping it would be
+    /// surprising.
     /// </summary>
-    public void Validate()
+    public void Validate(bool enabled)
     {
-        if (!IsEnabled)
+        if (!enabled)
             return;
 
         if (string.IsNullOrWhiteSpace(CloseOutPrompt))
             throw new InvalidOperationException(
-                "CHATGPT_CLOSE_OUT_PROMPT_FILE is required when ChatGPT is enabled (OPENAI_API_KEY "
-                    + "is set): it supplies the prompt for the end-of-conversation close-out turn."
+                "ASSISTANT_CLOSE_OUT_PROMPT_FILE is required when an AI provider is configured: "
+                    + "it supplies the prompt for the end-of-conversation close-out turn."
             );
 
         if (CloseOutTimeoutSeconds <= 0)
             throw new InvalidOperationException(
-                "CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS must be greater than zero."
+                "ASSISTANT_CLOSE_OUT_TIMEOUT_SECONDS must be greater than zero."
             );
     }
 }

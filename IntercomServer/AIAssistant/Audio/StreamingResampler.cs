@@ -1,12 +1,13 @@
-namespace IntercomServer.ChatGpt.Audio;
+namespace IntercomServer.AIAssistant.Audio;
 
 /// <summary>
 /// A small streaming linear resampler for mono 16-bit PCM. It keeps fractional
 /// position and the trailing sample across calls, so consecutive buffers are
 /// resampled continuously without clicks at the boundaries.
 ///
-/// The intercom uses 16 kHz mono PCM16 while the OpenAI Realtime API uses
-/// 24 kHz mono PCM16, so one instance is used per direction per conversation.
+/// The intercom uses 16 kHz mono PCM16 while AI providers may use other rates
+/// (e.g. the OpenAI Realtime API uses 24 kHz), so one instance is used per
+/// direction per conversation. When the rates match it passes audio through.
 /// Not thread-safe: each instance is driven from a single thread.
 /// </summary>
 internal sealed class StreamingResampler(int inputRate, int outputRate)

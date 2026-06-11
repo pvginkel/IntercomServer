@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Serilog;
 
-namespace IntercomServer.ChatGpt;
+namespace IntercomServer.AIAssistant;
 
 /// <summary>
 /// Takes ownership of conversations whose live phase has ended and winds them down off to the
@@ -10,10 +10,10 @@ namespace IntercomServer.ChatGpt;
 /// <see cref="Conversation.CloseOutAsync"/>) and then disposes it. By the time a conversation
 /// arrives here its device has already been freed, so this all happens in the background.
 /// </summary>
-internal sealed class ConversationCloser(ChatGptConfiguration configuration)
+internal sealed class ConversationCloser(AssistantConfiguration configuration)
 {
     // Cap the close-out turn so a stuck model can't keep a session open forever. Configurable
-    // (CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS) because close-out may now do real work — loading an MCP
+    // (ASSISTANT_CLOSE_OUT_TIMEOUT_SECONDS) because close-out may now do real work — loading an MCP
     // server and making tool calls (e.g. sending an email) takes several model turns and round-trips.
     private readonly TimeSpan _closeOutTimeout = TimeSpan.FromSeconds(
         configuration.CloseOutTimeoutSeconds
