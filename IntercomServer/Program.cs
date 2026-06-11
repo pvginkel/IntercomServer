@@ -2,6 +2,7 @@
 using IntercomServer;
 using IntercomServer.AIAssistant;
 using IntercomServer.AIAssistant.ChatGpt;
+using IntercomServer.AIAssistant.Gemini;
 using IntercomServer.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -58,6 +59,16 @@ var builder = new HostBuilder().ConfigureServices(
                 : "gpt-5.5",
             Voice = Env("CHATGPT_VOICE") is { Length: > 0 } voice ? voice : "marin",
         };
+        var geminiConfiguration = new GeminiConfiguration
+        {
+            ApiKey = Env("GOOGLE_API_KEY"),
+            Model = Env("GOOGLE_CHAT_MODEL") is { Length: > 0 } chatModel
+                ? chatModel
+                : new GeminiConfiguration().Model,
+            Voice = Env("GOOGLE_VOICE") is { Length: > 0 } googleVoice
+                ? googleVoice
+                : new GeminiConfiguration().Voice,
+        };
         var assistantConfiguration = new AssistantConfiguration
         {
             Locale = Env("ASSISTANT_LOCALE"),
@@ -100,10 +111,43 @@ var builder = new HostBuilder().ConfigureServices(
                 : new AssistantConfiguration().MicGatePrerollMs,
         };
 
+        // ASSISTANT_VOICE_PROVIDER selects which AI provider backs the conversations. When it
+        // is not set the feature is off; when it names a provider whose API key is missing the
+        // host refuses to start rather than misbehaving at the first button press.
+        var voiceProvider = Env("ASSISTANT_VOICE_PROVIDER");
+        switch (voiceProvider?.ToLowerInvariant())
+        {
+            case "chatgpt":
+                if (!chatGptConfiguration.IsEnabled)
+                    throw new InvalidOperationException(
+                        "OPENAI_API_KEY is required when ASSISTANT_VOICE_PROVIDER is 'chatgpt'."
+                    );
+                services.AddSingleton<IAssistantSessionFactory, ChatGptSessionFactory>();
+                break;
+
+            case "google":
+                if (!geminiConfiguration.IsEnabled)
+                    throw new InvalidOperationException(
+                        "GOOGLE_API_KEY is required when ASSISTANT_VOICE_PROVIDER is 'google'."
+                    );
+                services.AddSingleton<IAssistantSessionFactory, GeminiSessionFactory>();
+                break;
+
+            case null or "":
+                services.AddSingleton<IAssistantSessionFactory, DisabledSessionFactory>();
+                break;
+
+            default:
+                throw new InvalidOperationException(
+                    $"Unknown ASSISTANT_VOICE_PROVIDER '{voiceProvider}'; use 'chatgpt' or 'google'."
+                );
+        }
+
         // Fails fast on a fatal misconfiguration before the host starts in a broken state.
-        assistantConfiguration.Validate(chatGptConfiguration.IsEnabled);
+        assistantConfiguration.Validate(enabled: !string.IsNullOrEmpty(voiceProvider));
 
         services.AddSingleton(chatGptConfiguration);
+        services.AddSingleton(geminiConfiguration);
         services.AddSingleton(assistantConfiguration);
         services.AddSingleton(
             new AudioServerConfiguration
@@ -128,7 +172,6 @@ var builder = new HostBuilder().ConfigureServices(
         services.AddSingleton<McpToolRegistry>();
         services.AddSingleton<WebSearchTool>();
         services.AddSingleton<MemoryStore>();
-        services.AddSingleton<IAssistantSessionFactory, ChatGptSessionFactory>();
         services.AddSingleton<ConversationCloser>();
         services.AddSingleton<ConversationManager>();
         services.AddSingleton(p => p.GetRequiredService<MqttClientFactory>().CreateMqttClient());

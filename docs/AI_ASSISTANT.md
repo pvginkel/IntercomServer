@@ -1,42 +1,48 @@
-# ChatGPT voice assistant & MCP tools
+# AI voice assistant & MCP tools
 
-This intercom can hold a spoken conversation with ChatGPT using the
-[OpenAI Realtime API](https://developers.openai.com/api/docs/guides/voice-agents),
-and you can give that assistant extra abilities by plugging in **MCP servers**.
+This intercom can hold a spoken conversation with an AI assistant — backed by ChatGPT
+([OpenAI Realtime API](https://developers.openai.com/api/docs/guides/voice-agents)) or
+Gemini (Google Live API), selected with `ASSISTANT_VOICE_PROVIDER` — and you can give
+that assistant extra abilities by plugging in **MCP servers**.
 
 ## How a user starts a conversation
 
 - **Long‑press** the button on a device that is idle (not in a call, not ringing,
-  not being dialed) → the device starts a ChatGPT voice conversation.
+  not being dialed) → the device starts a voice conversation with the assistant.
 - **Short‑press** that same device's button, or simply say *"goodbye"*, ends it.
-- Conversations are **per device and concurrent**: several devices can talk to ChatGPT
-  at the same time, and other devices can still call each other. The only restriction is
-  that a device which is in a conversation is **not rung** by incoming calls until it
-  hangs up (the doorbell still sounds on it).
+- Conversations are **per device and concurrent**: several devices can talk to the
+  assistant at the same time, and other devices can still call each other. The only
+  restriction is that a device which is in a conversation is **not rung** by incoming
+  calls until it hangs up (the doorbell still sounds on it).
 
 Under the hood the server tells the device to stream its microphone (over UDP) to
-an audio endpoint the server exposes, bridges that audio to OpenAI, and streams the
-model's spoken reply back to the device over the same path used for ring tones.
-Audio is resampled between the intercom's 16 kHz and OpenAI's 24 kHz automatically.
+an audio endpoint the server exposes, bridges that audio to the AI provider, and streams
+the model's spoken reply back to the device over the same path used for ring tones.
+Audio is resampled between the intercom's 16 kHz and the provider's rates automatically.
 
 ## Enabling the feature
 
-The feature is **off** until an OpenAI API key is present. Configuration is read
-from environment variables (same style as the existing `MQTT_*` settings):
+The feature is **off** until `ASSISTANT_VOICE_PROVIDER` selects a provider (whose API key
+must then be set). Configuration is read from environment variables (same style as the
+existing `MQTT_*` settings):
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `OPENAI_API_KEY` | **yes** | — | OpenAI API key. When empty the whole feature is disabled. |
-| `CHATGPT_MODEL` | no | `gpt-realtime` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
-| `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
-| `CHATGPT_WEB_SEARCH_MODEL` | no | `gpt-5.5` | Model used by the built-in `web_search` tool (see below). |
+| `ASSISTANT_VOICE_PROVIDER` | **yes** | — | `chatgpt` or `google`. When empty the whole feature is disabled. |
+| `OPENAI_API_KEY` | with `chatgpt` | — | OpenAI API key. |
+| `CHATGPT_MODEL` | no | `gpt-realtime` | OpenAI realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
+| `CHATGPT_VOICE` | no | `marin` | OpenAI voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
+| `CHATGPT_WEB_SEARCH_MODEL` | no | `gpt-5.5` | Model used by the ChatGPT provider's `web_search` tool (see below). |
+| `GOOGLE_API_KEY` | with `google` | — | Google API key. |
+| `GOOGLE_CHAT_MODEL` | no | `gemini-3.1-flash-live-preview` | Gemini Live model name. |
+| `GOOGLE_VOICE` | no | `Charon` | Gemini prebuilt voice (`Puck`, `Charon`, `Kore`, `Fenrir`, `Aoede`, `Leda`, `Orus`, `Zephyr`, ...). |
 | `ASSISTANT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}` and `{MEMORIES}` placeholders (see below). |
-| `ASSISTANT_CLOSE_OUT_PROMPT_FILE` | **yes** (when enabled) | — | Path to a file containing the free‑form instruction for the end‑of‑conversation **close‑out** turn (see *Close‑out turn* below); read at startup. **Required** whenever `OPENAI_API_KEY` is set — there is no built‑in default, and the app refuses to start without it. |
+| `ASSISTANT_CLOSE_OUT_PROMPT_FILE` | **yes** (when enabled) | — | Path to a file containing the free‑form instruction for the end‑of‑conversation **close‑out** turn (see *Close‑out turn* below); read at startup. **Required** whenever a provider is selected — there is no built‑in default, and the app refuses to start without it. |
 | `ASSISTANT_CLOSE_OUT_TIMEOUT_SECONDS` | no | `30` | Hard cap on the background close‑out turn (see *Close‑out turn* below). Generous by default because close‑out may make MCP tool calls (e.g. sending an email). Must be greater than zero. |
 | `ASSISTANT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
 | `DATA_DIR` | no | `data` | Root folder for the server's persistent data. The model's memories live in a `memories/` sub-folder (see *Memory* below). |
-| `ASSISTANT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the 16 kHz stream sent to the device). |
+| `ASSISTANT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the conversation's audio is also written to WAV files in this directory (the raw stream received from the provider, the 16 kHz stream sent to the device, and the device microphone). |
 
 The system prompt may include the placeholder **`{NOW}`**, which is replaced at the start of
 each conversation with the current date and time as a natural, culture-specific long
@@ -46,19 +52,34 @@ It is substituted per conversation, so the time is always current rather than fr
 The prompt may also include **`{MEMORIES}`**, replaced (per conversation) with a Markdown
 list of the stored memories — see *Memory* below. With no memories yet it becomes empty.
 
-The server's UDP audio endpoint is a general (non‑ChatGPT) setting:
+The server's UDP audio endpoint is a general (non‑assistant) setting:
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `AUDIO_PORT` | no | `5004` | UDP port the server listens on for inbound device audio. |
 | `AUDIO_HOST` | no | auto‑detected LAN IPv4 | The address devices stream their audio to. **Must be reachable by the devices.** Behind NAT or a Kubernetes LoadBalancer set this to the external/LB IP — auto‑detection returns this host's own NIC address, which inside a Kubernetes pod is the (unreachable) pod IP. |
 
+## Provider differences
+
+The conversation behaves the same regardless of the provider — same button flow, same
+tools, same memory, same close‑out turn. What differs is how each provider implements
+the pieces:
+
+| | `chatgpt` (OpenAI Realtime API) | `google` (Gemini Live API) |
+| --- | --- | --- |
+| Audio | 24 kHz in/out (resampled from/to the intercom's 16 kHz) | 16 kHz in (no resampling), 24 kHz out |
+| Web search | `web_search` function tool, backed by a separate OpenAI Responses API call (`CHATGPT_WEB_SEARCH_MODEL`) | Native Google Search grounding — no function call round‑trip |
+| MCP tools | Loaded **on demand** via `use_<server>` loaders (see below) | All exposed **up front** — the Live API fixes the tool set at session setup |
+| Conversation start | The assistant greets the user immediately | Silent until the user asks something |
+| End of the user's turn | The provider's voice activity detection reports it, closing the mic gate promptly | Inferred: the model starting to speak is taken as end‑of‑turn (honored only if the mic has gone quiet); the hold‑time backstop (`ASSISTANT_MIC_GATE_HOLD_MS`) still applies |
+| Close‑out turn | Text‑only responses (no audio is paid for) | The response modality is fixed at setup, so audio is still generated; it is discarded, never sent to the device |
+
 ## Plugging in an MCP server
 
 > **The app is the MCP client.** It connects to *your* MCP servers privately over
-> HTTP and re‑exposes their tools to ChatGPT as ordinary function calls. Your MCP
-> servers are **never** handed to OpenAI and are **never** exposed to the public
-> internet — when the model wants a tool, OpenAI asks *this server*, and this
+> HTTP and re‑exposes their tools to the AI model as ordinary function calls. Your MCP
+> servers are **never** handed to the AI provider and are **never** exposed to the public
+> internet — when the model wants a tool, the provider asks *this server*, and this
 > server calls your MCP server locally and returns the result.
 
 Adding an MCP server is a **config change only — no code**:
@@ -110,11 +131,12 @@ Adding an MCP server is a **config change only — no code**:
    truncated to 64 characters) so two servers can expose tools with the same name
    without colliding.
 
-### On‑demand tool loading
+### On‑demand tool loading (ChatGPT provider)
 
 Tool **definitions** (name, description, JSON schema) cost context tokens on every turn, and a
 realtime voice session re‑pays that cost continually. With hundreds of tools across several
-servers that baseline becomes large, so MCP tools are **not** handed to the model up front.
+servers that baseline becomes large, so when the provider supports changing the tool set
+mid‑session, MCP tools are **not** handed to the model up front.
 
 Instead, each server is exposed as a single **`use_<name>`** loader tool (so `home` →
 `use_home`). The loader's description carries the server's `description` **and the names of all the
@@ -131,6 +153,9 @@ short pause in a spoken conversation — in exchange for a much smaller, cheaper
 per‑server **`description`** still matters: together with the listed tool names it is what the
 model sees when choosing what to load.
 
+The Gemini Live API fixes its tool set when the session is created, so with the `google`
+provider there are no loaders: every server's tools are in the session from the start.
+
 ### Notes & limitations
 
 - **Transport:** remote **HTTP** MCP servers (Streamable HTTP / SSE). The official
@@ -144,10 +169,11 @@ model sees when choosing what to load.
   deployment‑specific config; commit `mcpservers.example.json` instead.
 - A built‑in `end_conversation` tool is always available to the model so it can
   hang up when you say goodbye.
-- A built‑in `web_search` tool is always available: when the model calls it, the server
-  runs a separate OpenAI Responses API request (`CHATGPT_WEB_SEARCH_MODEL`, default
-  `gpt-5.5`) with the hosted web‑search tool, low reasoning effort and a concise reasoning
-  summary, and feeds the answer back into the conversation.
+- Web search is always available, implemented per provider (see *Provider differences*).
+  The ChatGPT provider's `web_search` runs a separate OpenAI Responses API request
+  (`CHATGPT_WEB_SEARCH_MODEL`, default `gpt-5.5`) with the hosted web‑search tool, low
+  reasoning effort and a concise reasoning summary, and feeds the answer back into the
+  conversation.
 
 ## Memory
 
@@ -178,22 +204,22 @@ The folder is plain `.md` files, so you can read and edit them yourself.
 
 When a conversation ends, the model is given one final turn. As soon as the conversation
 closes — the user hangs up, or the model says goodbye — the device is freed immediately and, in
-the background, the model is handed a final **text-only** turn driven by the *close-out prompt*.
-The prompt is free-form and the turn keeps the **same tools the live session had** (memory, web
-search and any MCP servers already loaded via their `use_<server>` loaders), so the close-out turn
-can actually *finish work* the user asked for on their way out:
+the background, the model is handed a final **audio-free** turn driven by the *close-out prompt*
+(text-only on ChatGPT; on Gemini the audio is generated but discarded — see *Provider
+differences*). The prompt is free-form and the turn keeps the **same tools the live session had**
+(memory, web search and every MCP server that is in the session), so the close-out turn can
+actually *finish work* the user asked for on their way out:
 
 > *"Send an email to Alice saying I'll be ten minutes late — thanks, bye."* → the user hangs up →
-> in the background the model loads the Google server (if it hadn't already), drafts the mail and
-> sends it, then persists anything worth remembering — all without holding the line open.
+> in the background the model loads the Google Workspace server (if it hadn't already), drafts the
+> mail and sends it, then persists anything worth remembering — all without holding the line open.
 
 This is possible because each conversation holds an **MCP lease** that keeps its server
 connections open until the conversation is fully disposed, i.e. *after* the close-out turn — not
 at hang-up. The close-out turn **reuses the existing session tools** rather than sending its own
-list, so it adds no tool-schema tokens and is purely text-only (no audio is generated for the
-freed device). `end_conversation` stays available but simply reports that the call has already
-ended. (A conversation that drops because of a network error skips close-out, since there is no
-session left to ask.)
+list, so it adds no tool-schema tokens. `end_conversation` stays available but simply reports that
+the call has already ended. (A conversation that drops because of a network error skips close-out,
+since there is no session left to ask.)
 
 The turn is capped so a stuck model can't keep a session open forever — 30 seconds by default,
 configurable with `ASSISTANT_CLOSE_OUT_TIMEOUT_SECONDS`.

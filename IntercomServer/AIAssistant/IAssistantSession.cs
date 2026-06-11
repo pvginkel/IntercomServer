@@ -29,8 +29,8 @@ internal interface IAssistantSession : IDisposable
     bool SupportsAddingTools { get; }
 
     /// <summary>
-    /// Connects to the provider, configures the session (instructions, tools, audio, voice
-    /// activity detection) and asks the assistant to greet the user.
+    /// Connects to the provider and configures the session (instructions, tools, audio, voice
+    /// activity detection).
     /// </summary>
     Task StartAsync(AssistantSessionOptions options, CancellationToken cancellationToken);
 

@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Google.GenAI" Version="1.10.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.2" />
     <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
     <PackageReference Include="MQTTnet" Version="5.0.1.1416" />

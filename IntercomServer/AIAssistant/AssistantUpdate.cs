@@ -29,9 +29,10 @@ internal sealed record OutputAudioEndedUpdate : AssistantUpdate;
 internal sealed record UserSpeechStartedUpdate : AssistantUpdate;
 
 /// <summary>
-/// The provider's voice activity detection decided the user's turn ended. Optional: not every
-/// provider reports this, so consumers may use it only as a hint (the mic gate treats it as
-/// the primary close signal but keeps its own time-based backstop).
+/// The provider's voice activity detection decided the user's turn ended. The signal may be
+/// explicit (OpenAI's speech-stopped event) or inferred (Gemini: the model starting to speak),
+/// so consumers should treat it as a strong hint rather than ground truth — the mic gate
+/// honors it only when the mic has actually gone quiet, and keeps its time-based backstop.
 /// </summary>
 internal sealed record UserSpeechEndedUpdate : AssistantUpdate;
 

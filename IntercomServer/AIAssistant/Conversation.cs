@@ -28,6 +28,14 @@ internal sealed class Conversation
     // delivery without starving the device's jitter buffer at the start of a reply.
     private const double PrerollSeconds = 0.15;
 
+    // How much continuous quiet the mic must have seen for a UserSpeechEndedUpdate to close the
+    // gate. The signal may be inferred (Gemini: the model starting to speak) and can be wrong —
+    // if the mic is loud at that moment the user is most likely still talking, so the signal is
+    // dropped and the gate stays open (the provider's barge-in handling sorts out the overlap).
+    // Genuine end-of-turn signals comfortably clear this: every provider waits out a silence
+    // window of several hundred ms before deciding the user's turn ended.
+    private const int SpeechEndedMinQuietMs = 200;
+
     private static readonly ILogger Logger = Log.ForContext<Conversation>();
 
     private readonly AssistantConfiguration _configuration;
@@ -574,6 +582,7 @@ internal sealed class Conversation
         var sampleRate = Constants.AudioFormat.SampleRate;
         var attackSamples = (long)_configuration.MicGateAttackMs * sampleRate / 1000;
         var backstopSamples = (long)_configuration.MicGateHoldMs * sampleRate / 1000;
+        var minQuietSamples = (long)SpeechEndedMinQuietMs * sampleRate / 1000;
 
         var rms = Rms(mic, sampleCount);
         if (rms >= threshold)
@@ -601,8 +610,14 @@ internal sealed class Conversation
         }
         else if (Interlocked.Exchange(ref _userSpeechEnded, 0) == 1)
         {
-            _gateOpen = false;
-            closeReason = "user turn ended";
+            // Plausibility check (see SpeechEndedMinQuietMs): only close on the signal when the
+            // mic has actually gone quiet; a loud mic means the user is still talking and the
+            // signal — possibly inferred — is wrong, so it is consumed and dropped.
+            if (_samplesSinceLoud >= minQuietSamples)
+            {
+                _gateOpen = false;
+                closeReason = "user turn ended";
+            }
         }
         else if (_configuration.MicGateHoldMs >= 0 && _samplesSinceLoud > backstopSamples)
         {

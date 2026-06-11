@@ -27,7 +27,7 @@ namespace IntercomServer.AIAssistant;
 /// call would otherwise fail with "No active SSE connection for session …"), while still sharing
 /// one connection across overlapping conversations.
 ///
-/// To add a new MCP server, drop an entry in the JSON config file (see docs/CHATGPT_MCP.md).
+/// To add a new MCP server, drop an entry in the JSON config file (see docs/AI_ASSISTANT.md).
 /// No code changes are required.
 /// </summary>
 internal sealed class McpToolRegistry(AssistantConfiguration configuration)
