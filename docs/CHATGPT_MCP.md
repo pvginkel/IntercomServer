@@ -30,7 +30,7 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_MODEL` | no | `gpt-realtime` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
 | `CHATGPT_WEB_SEARCH_MODEL` | no | `gpt-5.5` | Model used by the built-in `web_search` tool (see below). |
-| `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}` and `{MEMORIES}` placeholders (see below). |
+| `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}`, `{MEMORIES}` and `{DEVICE_NAME}` placeholders (see below). |
 | `CHATGPT_CLOSE_OUT_PROMPT_FILE` | **yes** (when enabled) | — | Path to a file containing the free‑form instruction for the end‑of‑conversation **close‑out** turn (see *Close‑out turn* below); read at startup. **Required** whenever `OPENAI_API_KEY` is set — there is no built‑in default, and the app refuses to start without it. |
 | `CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS` | no | `30` | Hard cap on the background close‑out turn (see *Close‑out turn* below). Generous by default because close‑out may make MCP tool calls (e.g. sending an email). Must be greater than zero. |
 | `CHATGPT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
@@ -45,6 +45,9 @@ It is substituted per conversation, so the time is always current rather than fr
 
 The prompt may also include **`{MEMORIES}`**, replaced (per conversation) with a Markdown
 list of the stored memories — see *Memory* below. With no memories yet it becomes empty.
+
+It may also include **`{DEVICE_NAME}`**, replaced (per conversation) with the device's
+configured name. When the device reports no name, it falls back to the device id.
 
 The server's UDP audio endpoint is a general (non‑ChatGPT) setting:
 
