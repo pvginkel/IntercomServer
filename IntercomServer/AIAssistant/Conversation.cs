@@ -724,10 +724,12 @@ internal sealed class Conversation
     {
         var culture = ResolveCulture(_configuration.Locale);
         var now = DateTime.Now.ToString("f", culture);
+        var deviceName = Device.Configuration?.Device?.Name ?? Device.DeviceId;
 
         return _configuration
             .Instructions.Replace("{NOW}", now)
-            .Replace("{MEMORIES}", _memory.RenderMemoriesList());
+            .Replace("{MEMORIES}", _memory.RenderMemoriesList())
+            .Replace("{DEVICE_NAME}", deviceName);
     }
 
     private static CultureInfo ResolveCulture(string? locale)

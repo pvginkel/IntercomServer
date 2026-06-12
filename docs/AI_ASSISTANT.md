@@ -36,7 +36,7 @@ existing `MQTT_*` settings):
 | `GOOGLE_API_KEY` | with `google` | — | Google API key. |
 | `GOOGLE_CHAT_MODEL` | no | `gemini-3.1-flash-live-preview` | Gemini Live model name. |
 | `GOOGLE_VOICE` | no | `Charon` | Gemini prebuilt voice (`Puck`, `Charon`, `Kore`, `Fenrir`, `Aoede`, `Leda`, `Orus`, `Zephyr`, ...). |
-| `ASSISTANT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}` and `{MEMORIES}` placeholders (see below). |
+| `ASSISTANT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}`, `{MEMORIES}` and `{DEVICE_NAME}` placeholders (see below). |
 | `ASSISTANT_CLOSE_OUT_PROMPT_FILE` | **yes** (when enabled) | — | Path to a file containing the free‑form instruction for the end‑of‑conversation **close‑out** turn (see *Close‑out turn* below); read at startup. **Required** whenever a provider is selected — there is no built‑in default, and the app refuses to start without it. |
 | `ASSISTANT_CLOSE_OUT_TIMEOUT_SECONDS` | no | `30` | Hard cap on the background close‑out turn (see *Close‑out turn* below). Generous by default because close‑out may make MCP tool calls (e.g. sending an email). Must be greater than zero. |
 | `ASSISTANT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
@@ -51,6 +51,9 @@ It is substituted per conversation, so the time is always current rather than fr
 
 The prompt may also include **`{MEMORIES}`**, replaced (per conversation) with a Markdown
 list of the stored memories — see *Memory* below. With no memories yet it becomes empty.
+
+It may also include **`{DEVICE_NAME}`**, replaced (per conversation) with the device's
+configured name. When the device reports no name, it falls back to the device id.
 
 The server's UDP audio endpoint is a general (non‑assistant) setting:
 
