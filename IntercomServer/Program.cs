@@ -47,6 +47,15 @@ var builder = new HostBuilder().ConfigureServices(
     (context, services) =>
     {
         services.AddHostedService<Service>();
+        services.AddHostedService<HealthEndpointService>();
+        services.AddSingleton(
+            new HealthEndpointConfiguration
+            {
+                Port = string.IsNullOrEmpty(Env("HEALTH_PORT"))
+                    ? 8080
+                    : int.Parse(Env("HEALTH_PORT")!),
+            }
+        );
         services.AddSingleton(
             new ServerConfiguration
             {
