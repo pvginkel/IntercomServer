@@ -28,6 +28,7 @@ internal class Server(
 
     private MqttClientOptions? _options;
     private int _reconnecting; // 0 = no reconnect loop running, 1 = one is running.
+    private int _disposed; // 0 = live, 1 = DisposeAsync has run (guards a double dispose).
     private volatile bool _subscribed; // True once connected *and* our subscriptions are in place.
 
     /// <summary>
@@ -90,12 +91,18 @@ internal class Server(
     {
         _subscribed = false;
 
-        var result = await client.ConnectAsync(_options!, cancellationToken);
-        if (result.ResultCode != MqttClientConnectResultCode.Success)
+        // Skip the connect when the socket is already up but our subscriptions are not (a previous
+        // attempt connected, then failed before subscribing): reconnecting an already-connected
+        // client would throw, so fall through and just (re)subscribe below.
+        if (!client.IsConnected)
         {
-            throw new InvalidOperationException(
-                $"Failed to connect to the MQTT server with error '{result.ResultCode}'"
-            );
+            var result = await client.ConnectAsync(_options!, cancellationToken);
+            if (result.ResultCode != MqttClientConnectResultCode.Success)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to connect to the MQTT server with error '{result.ResultCode}'"
+                );
+            }
         }
 
         // Subscriptions don't survive a reconnect (clean session), so (re)establish them on every
@@ -170,7 +177,10 @@ internal class Server(
             {
                 await Task.Delay(delay, cancellationToken);
 
-                if (client.IsConnected)
+                // Already fully healthy (connected *and* subscribed) via an earlier iteration? Done.
+                // Checking only client.IsConnected here would abandon a connection that came up but
+                // never finished subscribing, leaving the server connected yet deaf.
+                if (client.IsConnected && _subscribed)
                     return;
 
                 Logger.Information("Attempting to reconnect to the MQTT server");
@@ -346,6 +356,11 @@ internal class Server(
 
     public async ValueTask DisposeAsync()
     {
+        // Disposed both explicitly (Service.StopAsync) and by the DI container at host shutdown;
+        // run the teardown only once so the second call doesn't touch the disposed _shutdownCts.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         // Stop the reconnect loop and tell OnDisconnected this disconnect is intentional, so it
         // doesn't try to bring the connection back up while we're shutting down.
         await _shutdownCts.CancelAsync();

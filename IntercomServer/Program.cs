@@ -46,8 +46,11 @@ Log.Logger = new LoggerConfiguration()
 var builder = new HostBuilder().ConfigureServices(
     (context, services) =>
     {
-        services.AddHostedService<Service>();
+        // Start the health endpoint before Service so the liveness/readiness probes are answered
+        // immediately — including while Service.StartAsync is still dialing the MQTT broker and
+        // discovering MCP servers (which can block). Hosted services start in registration order.
         services.AddHostedService<HealthEndpointService>();
+        services.AddHostedService<Service>();
         services.AddSingleton(
             new HealthEndpointConfiguration
             {
