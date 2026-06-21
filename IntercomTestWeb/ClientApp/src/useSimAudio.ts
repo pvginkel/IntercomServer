@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { SimAudioSession, listAudioDevices, type AudioDevices } from './audio';
+import { SimAudioSession, listAudioDevices, AUDIO_OFF, type AudioDevices } from './audio';
 
 // React lifecycle wrapper around a SimAudioSession. Audio is enabled globally by the AudioGate (one
 // permission prompt for the whole app), so this auto-starts a session whenever `active` is true —
@@ -16,8 +16,9 @@ export interface SimAudio {
 
 export function useSimAudio(deviceId: string, recording: boolean, active: boolean): SimAudio {
   const [devices, setDevices] = useState<AudioDevices>({ mics: [], speakers: [] });
-  const [micId, setMicId] = useState('');
-  const [speakerId, setSpeakerId] = useState('');
+  // Channels start off; the operator selects a device to enable each one.
+  const [micId, setMicId] = useState(AUDIO_OFF);
+  const [speakerId, setSpeakerId] = useState(AUDIO_OFF);
   const [error, setError] = useState<string | null>(null);
 
   const sessionRef = useRef<SimAudioSession | null>(null);

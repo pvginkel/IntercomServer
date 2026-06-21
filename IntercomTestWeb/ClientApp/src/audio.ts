@@ -12,7 +12,7 @@
 type SinkContext = AudioContext & { setSinkId?: (id: string) => Promise<void> };
 
 // Picker value that disables a channel (no mic capture / no playback), mirroring the WPF app's blank
-// device entry. The empty string means "default device"; a specific id selects that device.
+// device entry. Channels default to off; selecting a specific device id enables that channel.
 export const AUDIO_OFF = 'off';
 
 export interface AudioDevices {
