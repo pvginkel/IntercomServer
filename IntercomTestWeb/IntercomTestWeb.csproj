@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <SpaRoot>ClientApp\</SpaRoot>
+    <!-- Set -p:SkipSpaBuild=true to build the backend without rebuilding the React SPA
+         (e.g. when iterating on the front-end with `npm run dev`). -->
+    <SkipSpaBuild Condition="'$(SkipSpaBuild)' == ''">false</SkipSpaBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="5.0.1.1416" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.Debug" Version="3.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IntercomServer.Utils\IntercomServer.Utils.csproj" />
+  </ItemGroup>
+
+  <!-- The Vite/React SPA is built into wwwroot, which Kestrel serves as static files (single
+       origin, no second dev server). Runs on every build unless SkipSpaBuild is set. -->
+  <Target Name="BuildSpa" BeforeTargets="Build" Condition="'$(SkipSpaBuild)' != 'true'">
+    <Message Importance="high" Text="Building ClientApp SPA into wwwroot ..." />
+    <Exec Command="npm install" WorkingDirectory="$(SpaRoot)" Condition="!Exists('$(SpaRoot)node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
+  </Target>
+
+</Project>

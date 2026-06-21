@@ -11,3 +11,9 @@ mcpservers.json
 
 # Persistent data (memories, etc.) written at runtime under DATA_DIR's default location.
 /data
+
+# IntercomTestWeb: SPA build output (Vite -> wwwroot), node modules, and runtime data dir.
+/IntercomTestWeb/wwwroot
+/IntercomTestWeb/ClientApp/node_modules
+/IntercomTestWeb/ClientApp/dist
+/IntercomTestWeb/data
