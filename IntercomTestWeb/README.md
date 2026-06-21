@@ -17,17 +17,18 @@ architecture and the phase plan.
   byte-identical to the UDP frame. Mic is streamed only while the device's `recording` state is set,
   matching the WPF behavior.
 - JSON-file persistence: `data/Devices.json` (sim devices) and `data/settings.json` (auto-accept).
-- React UI: a one-time audio gate (a single "Enable audio & continue" prompt for the whole app,
-  since browsers require a user gesture for mic + AudioContext), then the console with the toolbar,
-  real-device cards, sim-device cards (mic/speaker pickers; audio is forced on once the gate passes),
-  and the audio-config dialog.
+- React UI: an audio gate that requests microphone access automatically on load (Chrome prompts
+  without a gesture; a suspended AudioContext is resumed on the first page interaction). Once granted,
+  audio is forced on for the whole app — the console shows the toolbar, real-device cards, sim-device
+  cards (mic/speaker pickers, sessions auto-start), and the audio-config dialog. If the request is
+  denied it offers Retry / Continue without audio.
 
 Deferred: the AEC tool + spectrogram/recorder (Phase C).
 
 > **Mic access needs a secure context.** Browsers only expose `getUserMedia`/device labels over HTTPS
 > or `localhost`. Over plain HTTP to a LAN hostname the audio gate fails (with a "Continue without
 > audio" escape that leaves the rest of the UI usable). Use the operator's TLS termination (D12), or
-> `http://localhost:8080/` during dev. Output-device selection uses `AudioContext.setSinkId` (Chrome);
+> `http://localhost:8081/` during dev. Output-device selection uses `AudioContext.setSinkId` (Chrome);
 > other browsers fall back to the default sink.
 
 ## Running
@@ -39,12 +40,12 @@ Configuration is via environment variables (D14):
 | `MQTT_HOST` | — | **Required** (broker hostname/IP). |
 | `MQTT_PORT` | MQTT default | |
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | — | Optional broker credentials. |
-| `HTTP_PORT` | `8080` | Kestrel binds `0.0.0.0:$HTTP_PORT` so the LAN hostname works. |
+| `HTTP_PORT` | `8081` | Kestrel binds `0.0.0.0:$HTTP_PORT` so the LAN hostname works. |
 | `DATA_DIR` | `data` | Where `Devices.json` / `settings.json` are written. |
 
 ```sh
 MQTT_HOST=192.168.1.10 dotnet run --project IntercomTestWeb
-# then browse http://<this-host>:8080/
+# then browse http://<this-host>:8081/
 ```
 
 A `dotnet build`/`run` builds the SPA into `wwwroot` automatically (see the `BuildSpa` MSBuild
@@ -53,7 +54,7 @@ target). TLS is out of scope and owned by the operator (D12); this is a plain-HT
 ## Front-end development
 
 For HMR while iterating on the React app, run the Vite dev server (it proxies `/api` and `/ws` to
-the backend on `:8080`) and start the backend separately with the SPA build skipped:
+the backend on `:8081`) and start the backend separately with the SPA build skipped:
 
 ```sh
 cd IntercomTestWeb/ClientApp && npm install && npm run dev     # Vite on :5173

@@ -16,6 +16,29 @@ export interface AudioDevices {
   speakers: MediaDeviceInfo[];
 }
 
+// The mic is requested automatically on load (AudioGate), not from a click, so a context created
+// afterwards can start suspended under the browser autoplay policy. Resume any such context on the
+// first page interaction — a single shared listener covers every device's context.
+const pendingResume = new Set<AudioContext>();
+let resumeListenerInstalled = false;
+
+function resumeOnFirstGesture(ctx: AudioContext): void {
+  pendingResume.add(ctx);
+  if (resumeListenerInstalled) return;
+  resumeListenerInstalled = true;
+
+  const handler = () => {
+    for (const c of pendingResume) void c.resume().catch(() => {});
+    pendingResume.clear();
+    resumeListenerInstalled = false;
+    document.removeEventListener('pointerdown', handler);
+    document.removeEventListener('keydown', handler);
+  };
+
+  document.addEventListener('pointerdown', handler);
+  document.addEventListener('keydown', handler);
+}
+
 export async function listAudioDevices(): Promise<AudioDevices> {
   const all = await navigator.mediaDevices.enumerateDevices();
   return {
@@ -87,6 +110,10 @@ export class SimAudioSession {
     source.connect(this.capture).connect(mute).connect(ctx.destination);
 
     await ctx.resume();
+    // If the autoplay policy kept it suspended (no gesture preceded creation), resume on first click.
+    if (ctx.state !== 'running') {
+      resumeOnFirstGesture(ctx);
+    }
   }
 
   // Server-gated: the browser only streams mic audio while the simulated device is recording, matching
@@ -121,6 +148,7 @@ export class SimAudioSession {
 
   async stop(): Promise<void> {
     this.closed = true;
+    if (this.ctx) pendingResume.delete(this.ctx);
     try {
       this.ws?.close();
     } catch {
