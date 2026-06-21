@@ -51,6 +51,20 @@ input[type='text'] {
   border-radius: 4px;
 }
 
+select {
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  max-width: 280px;
+}
+
+.row.error {
+  color: #b42318;
+  font-size: 13px;
+}
+
 .console {
   display: flex;
   flex-direction: column;

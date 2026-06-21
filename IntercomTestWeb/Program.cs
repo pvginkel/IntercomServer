@@ -62,6 +62,7 @@ try
 
     app.MapApiEndpoints();
     app.MapEventsWebSocket();
+    app.MapAudioWebSocket();
 
     // SPA fallback for any non-API route.
     app.MapFallbackToFile("index.html");

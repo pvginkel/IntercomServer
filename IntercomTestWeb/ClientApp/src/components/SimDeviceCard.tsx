@@ -2,12 +2,15 @@ import { useState } from 'react';
 import { api } from '../api';
 import type { SimDevice } from '../store';
 import { Led, useLedBlink } from './Led';
+import { useSimAudio } from '../useSimAudio';
 
 export function SimDeviceCard({ device }: { device: SimDevice }) {
   const [busy, setBusy] = useState(false);
   const state = device.state;
   const redOn = useLedBlink(device.ledRed);
   const greenOn = useLedBlink(device.ledGreen);
+
+  const audio = useSimAudio(device.id, !!state?.recording);
 
   const run = (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -46,6 +49,37 @@ export function SimDeviceCard({ device }: { device: SimDevice }) {
             <input type="checkbox" checked={!!state?.playing} readOnly disabled /> Playing
           </label>
         </div>
+
+        <div className="row">
+          <span className="label">Mic</span>
+          <DevicePicker
+            kind="mic"
+            devices={audio.devices.mics}
+            value={audio.micId}
+            onChange={audio.setMicId}
+          />
+        </div>
+        <div className="row">
+          <span className="label">Speaker</span>
+          <DevicePicker
+            kind="speaker"
+            devices={audio.devices.speakers}
+            value={audio.speakerId}
+            onChange={audio.setSpeakerId}
+          />
+        </div>
+        <div className="row buttons">
+          <button
+            className={audio.enabled ? 'primary' : undefined}
+            onClick={() => audio.setEnabled(!audio.enabled)}
+          >
+            {audio.enabled ? 'Audio On' : 'Enable Audio'}
+          </button>
+          {audio.enabled && (
+            <span className="status ok">live · {state?.recording ? 'mic streaming' : 'mic idle'}</span>
+          )}
+        </div>
+        {audio.error && <div className="row error">{audio.error}</div>}
       </div>
       <div className="card-actions">
         <button disabled={busy} onClick={() => run(() => api.removeSimDevice(device.id))}>
@@ -53,5 +87,28 @@ export function SimDeviceCard({ device }: { device: SimDevice }) {
         </button>
       </div>
     </div>
+  );
+}
+
+function DevicePicker({
+  kind,
+  devices,
+  value,
+  onChange,
+}: {
+  kind: 'mic' | 'speaker';
+  devices: MediaDeviceInfo[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Default</option>
+      {devices.map((d, i) => (
+        <option key={d.deviceId} value={d.deviceId}>
+          {d.label || `${kind === 'mic' ? 'Microphone' : 'Speaker'} ${i + 1}`}
+        </option>
+      ))}
+    </select>
   );
 }

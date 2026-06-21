@@ -21,12 +21,22 @@ public sealed class SimDeviceManager(
 {
     private static readonly ILogger Logger = Log.ForContext<SimDeviceManager>();
 
-    private sealed record Handle(SimDevice Device, SimDeviceClient Client, UdpAudioServer Udp);
+    private sealed record Handle(
+        SimDevice Device,
+        SimDeviceClient Client,
+        UdpAudioServer Udp,
+        AudioBridge Bridge
+    );
 
     private readonly ConcurrentDictionary<string, Handle> _handles =
         new(StringComparer.OrdinalIgnoreCase);
 
     public bool IsSimDevice(string id) => _handles.ContainsKey(id);
+
+    // The audio bridge for a simulated device, or null if it is unknown — used by the
+    // /ws/audio/{simDeviceId} endpoint to attach a browser audio connection.
+    public AudioBridge? GetAudioBridge(string id) =>
+        _handles.TryGetValue(id, out var handle) ? handle.Bridge : null;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -144,7 +154,11 @@ public sealed class SimDeviceManager(
 
         device.StateChanged += (_, _) => BroadcastState(device);
 
-        var handle = new Handle(device, client, udp);
+        // The bridge subscribes to the UDP server's Data event for downlink audio; it stays idle until
+        // a browser attaches over /ws/audio/{deviceId}.
+        var bridge = new AudioBridge(device, udp);
+
+        var handle = new Handle(device, client, udp, bridge);
         _handles[deviceId] = handle;
         return handle;
     }
@@ -184,6 +198,9 @@ public sealed class SimDeviceManager(
 
     private static async Task DisposeHandle(Handle handle)
     {
+        // Dispose the bridge first so it unsubscribes from the UDP server and stops its pump before
+        // the socket goes away.
+        await handle.Bridge.DisposeAsync();
         await handle.Client.DisposeAsync();
         handle.Udp.Dispose();
     }
