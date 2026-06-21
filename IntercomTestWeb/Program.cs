@@ -19,7 +19,7 @@ try
     builder.Host.UseSerilog();
 
     // Bind 0.0.0.0 so the LAN hostname works (§12); override the port with HTTP_PORT.
-    builder.WebHost.UseUrls($"http://0.0.0.0:{Env.Int("HTTP_PORT", 8080)}");
+    builder.WebHost.UseUrls($"http://0.0.0.0:{Env.Int("HTTP_PORT", 8081)}");
 
     // Use the centralized snake_case / ignore-null options for the REST API too, so request and
     // response bodies share the device wire shape.

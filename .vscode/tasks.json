@@ -22,6 +22,16 @@
         "instanceLimit": 999
       },
       "isBackground": true
+    },
+    {
+      "label": "Rebuild IntercomTestWeb",
+      "type": "shell",
+      "command": "npm run typecheck; npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/IntercomTestWeb/ClientApp"
+      },
+      "icon": { "id": "tools" },
+      "problemMatcher": [],
     }
   ]
 }

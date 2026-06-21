@@ -108,7 +108,7 @@ function DevicePicker({
 }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value={AUDIO_OFF}>Off (disabled)</option>
+      <option value={AUDIO_OFF}>Off</option>
       {devices.map((d, i) => (
         <option key={d.deviceId} value={d.deviceId}>
           {d.label || `${kind === 'mic' ? 'Microphone' : 'Speaker'} ${i + 1}`}
