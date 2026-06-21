@@ -11,6 +11,10 @@
 // AudioContext.setSinkId is not yet in the TS DOM lib; describe just what we use.
 type SinkContext = AudioContext & { setSinkId?: (id: string) => Promise<void> };
 
+// Picker value that disables a channel (no mic capture / no playback), mirroring the WPF app's blank
+// device entry. The empty string means "default device"; a specific id selects that device.
+export const AUDIO_OFF = 'off';
+
 export interface AudioDevices {
   mics: MediaDeviceInfo[];
   speakers: MediaDeviceInfo[];
@@ -64,15 +68,22 @@ export class SimAudioSession {
   ) {}
 
   async start(): Promise<void> {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error('Microphone access requires HTTPS or localhost.');
-    }
+    const micEnabled = this.micId !== AUDIO_OFF;
+    const speakerEnabled = this.speakerId !== AUDIO_OFF;
 
-    // Acquire the mic first (within the click gesture) so the permission prompt is reliable.
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: this.micId ? { deviceId: { exact: this.micId } } : true,
-    });
-    if (this.closed) return this.stop();
+    // Both channels off: nothing to bridge, so skip the socket and AudioContext entirely.
+    if (!micEnabled && !speakerEnabled) return;
+
+    if (micEnabled) {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Microphone access requires HTTPS or localhost.');
+      }
+      // The empty string selects the default mic; a specific id selects that device.
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: this.micId ? { deviceId: { exact: this.micId } } : true,
+      });
+      if (this.closed) return this.stop();
+    }
 
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(
@@ -86,28 +97,33 @@ export class SimAudioSession {
 
     const ctx: SinkContext = new AudioContext({ sampleRate: 16000 });
     this.ctx = ctx;
-    await ctx.audioWorklet.addModule('/worklets/capture-processor.js');
-    await ctx.audioWorklet.addModule('/worklets/playback-processor.js');
+    if (speakerEnabled) await ctx.audioWorklet.addModule('/worklets/playback-processor.js');
+    if (micEnabled) await ctx.audioWorklet.addModule('/worklets/capture-processor.js');
     if (this.closed) return this.stop();
 
-    // Downlink: playback worklet -> speaker.
-    this.playback = new AudioWorkletNode(ctx, 'playback-processor');
-    this.playback.connect(ctx.destination);
-    if (this.speakerId && typeof ctx.setSinkId === 'function') {
-      try {
-        await ctx.setSinkId(this.speakerId);
-      } catch {
-        // Output device selection is best-effort; fall back to the default sink.
+    // Downlink: playback worklet -> speaker. Skipped when the speaker is off; downlink frames are
+    // then dropped in onDownlink (no playback node).
+    if (speakerEnabled) {
+      this.playback = new AudioWorkletNode(ctx, 'playback-processor');
+      this.playback.connect(ctx.destination);
+      if (this.speakerId && typeof ctx.setSinkId === 'function') {
+        try {
+          await ctx.setSinkId(this.speakerId);
+        } catch {
+          // Output device selection is best-effort; fall back to the default sink.
+        }
       }
     }
 
     // Uplink: mic -> capture worklet. Route it through a muted gain to the destination so the worklet
-    // is pulled by the render graph without echoing the mic to the speaker.
-    const source = ctx.createMediaStreamSource(this.stream);
-    this.capture = new AudioWorkletNode(ctx, 'capture-processor');
-    this.capture.port.onmessage = (event) => this.onMicFrame(event.data as ArrayBuffer);
-    const mute = new GainNode(ctx, { gain: 0 });
-    source.connect(this.capture).connect(mute).connect(ctx.destination);
+    // is pulled by the render graph without echoing the mic to the speaker. Skipped when the mic is off.
+    if (micEnabled && this.stream) {
+      const source = ctx.createMediaStreamSource(this.stream);
+      this.capture = new AudioWorkletNode(ctx, 'capture-processor');
+      this.capture.port.onmessage = (event) => this.onMicFrame(event.data as ArrayBuffer);
+      const mute = new GainNode(ctx, { gain: 0 });
+      source.connect(this.capture).connect(mute).connect(ctx.destination);
+    }
 
     await ctx.resume();
     // If the autoplay policy kept it suspended (no gesture preceded creation), resume on first click.

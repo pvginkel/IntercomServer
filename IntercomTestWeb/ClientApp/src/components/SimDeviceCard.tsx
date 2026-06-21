@@ -4,6 +4,7 @@ import type { SimDevice } from '../store';
 import { Led, useLedBlink } from './Led';
 import { useSimAudio } from '../useSimAudio';
 import { useAudioReady } from './AudioGate';
+import { AUDIO_OFF } from '../audio';
 
 export function SimDeviceCard({ device }: { device: SimDevice }) {
   const [busy, setBusy] = useState(false);
@@ -75,7 +76,11 @@ export function SimDeviceCard({ device }: { device: SimDevice }) {
           {audio.error ? (
             <span className="status bad">{audio.error}</span>
           ) : audioReady ? (
-            <span className="status ok">live · {state?.recording ? 'mic streaming' : 'mic idle'}</span>
+            <span className="status ok">
+              live · mic{' '}
+              {audio.micId === AUDIO_OFF ? 'off' : state?.recording ? 'streaming' : 'idle'} · spk{' '}
+              {audio.speakerId === AUDIO_OFF ? 'off' : 'on'}
+            </span>
           ) : (
             <span className="status">off</span>
           )}
@@ -104,6 +109,7 @@ function DevicePicker({
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">Default</option>
+      <option value={AUDIO_OFF}>Off (disabled)</option>
       {devices.map((d, i) => (
         <option key={d.deviceId} value={d.deviceId}>
           {d.label || `${kind === 'mic' ? 'Microphone' : 'Speaker'} ${i + 1}`}
