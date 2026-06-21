@@ -13,7 +13,7 @@ re-litigating decisions.
 
 Reproduce 100% of the current IntercomTest feature set as a browser app backed by a
 small C# service. No new features. This is a **testing tool**, run only from a dev
-environment, accessed over the LAN by hostname (HTTPS).
+environment, accessed over the LAN by hostname.
 
 Features to preserve (all of them):
 
@@ -61,7 +61,7 @@ a small HTTP + WebSocket API. A **React** single-page app, served as static file
 the same process, is the UI.
 
 ```
-                          Browser (React SPA, HTTPS)
+                          Browser (React SPA)
    ┌─────────────────────────────────────────────────────────────────┐
    │  Control UI   │  AEC view + <canvas>  │  Simulated-device audio │
    └───────┬───────────────┬─────────────────────────────┬───────────┘
@@ -100,7 +100,7 @@ by the project owner.
 | D9 | Uplink jitter buffer (browser→device) | **100 ms** buffer in the backend | **(directed.)** Implemented by instantiating the existing `AudioMixer` with `bufferInterval = 100 ms`; it already buffers and reorders by sequence index. Home network, so a modest buffer suffices to smooth WS jitter before relaying to UDP. |
 | D10 | Downlink jitter buffer (device→browser) | Existing **100 ms** backend mixer + a small browser-side playback ring buffer (~150 ms) | Keeps current device→playback behavior; the browser buffer absorbs WS jitter on the way down. |
 | D11 | Waveform / spectrogram | **Compute server-side** (reuse existing FFT/Hann/dB-normalize), push per-column intensity arrays over the JSON WS; **draw on `<canvas>`** | The DSP is portable and already separated from the draw step. Only the `WriteableBitmap` blit is replaced (~30 lines of canvas). No DSP rewrite, tiny bandwidth (~16 columns/sec). |
-| D12 | Transport security | **HTTPS** via ASP.NET dev cert | **(directed: HTTPS is fine.)** Also required anyway — `getUserMedia` only works in a secure context on a non-localhost origin. |
+| D12 | Transport security (TLS) | **Out of scope — owned entirely by the operator** | **(directed.)** The operator has existing CA + certificate infrastructure and handles all TLS termination, certificates, and trust. This spec describes the app as a plain-HTTP service bound to `0.0.0.0`; how it is exposed securely is intentionally not specified here. |
 | D13 | Persistence | **JSON files** beside the executable (or a configurable data dir); **WAV files** (`AEC Sample.wav` / `AEC Output.wav`, recorder dumps) in the working dir | Replaces `%AppData%\Intercom Test\Devices.json` and the `HKCU\Webathome\Intercom Test` registry prefs. Working-dir for WAVs matches the desktop app and is accepted. Cross-platform, trivially inspectable. |
 | D14 | Configuration | **Environment variables** (`MQTT_HOST/PORT/USERNAME/PASSWORD`) + `appsettings.json` | Mirrors the existing env-var convention; no behavior change. |
 | D15 | Dependency injection | **Built-in `Microsoft.Extensions.DependencyInjection`** (host builder) | The desktop app used manual `new`; the host gives clean lifetime management for the MQTT clients, UDP servers, and WS connection registry. |
@@ -287,8 +287,10 @@ in the solution until the web app is verified at parity, then retire it.
 
 ## 12. Security & runtime
 
-- **HTTPS** via `dotnet dev-certs https --trust`; Kestrel binds `0.0.0.0` so the LAN
-  hostname works. Required regardless for `getUserMedia`.
+- **TLS is out of scope and owned entirely by the operator** (existing CA + cert
+  infrastructure). The app is specified as a plain-HTTP service; certificates, TLS
+  termination, and trust are handled externally and intentionally not described here.
+- Kestrel binds `0.0.0.0` so the LAN hostname works.
 - Dev-only: no auth, no rate limiting, no hardening. Single trusted operator.
 - Config via env vars (`MQTT_HOST/PORT/USERNAME/PASSWORD`) + `appsettings.json`.
 - Fixed UDP ports unchanged: **5139** (recorder), **5140** (AEC); simulated devices
@@ -310,7 +312,65 @@ in the solution until the web app is verified at parity, then retire it.
 
 ---
 
-## 14. Out of scope
+## 14. Implementation phasing
+
+Build in dependency order. Each phase is independently verifiable against live
+hardware, and the doc itself is the agent brief — point an agent at this file and the
+phase you want. **Phase A is the prerequisite; B and C are independent of each other**
+(the AEC tool has its own UDP server and a file-based audio source, so it does not
+depend on the live audio bridge).
+
+### Phase A — Control plane + UI (no audio) · *near one-shot, agent-friendly*
+
+- **Build (backend):** ASP.NET Core host + DI wiring; MQTT control client (ported from
+  `MainWindow`) with the live device registry; REST command endpoints (§6.1); the
+  `/ws/events` JSON push (`device-state` / `device-config` / `device-removed` /
+  `aec-status`); simulated-device MQTT presence (registers/advertises, no audio yet);
+  JSON-file persistence (D13).
+- **Build (front-end):** React shell (Vite/TS), `<Console>`, `<RealDeviceCard>`,
+  `<SimDeviceCard>` (controls only), `<AudioConfigDialog>`; the events-WS client and
+  REST command client.
+- **Verify (against real devices):** discover devices on the live MQTT bus; volume /
+  enable / identify / restart / remove; edit & push audio-config; doorbell; auto-accept;
+  add/remove a simulated device (presence only).
+- **Agent fit:** high — buildable end-to-end; you verify against hardware. No audio risk.
+
+### Phase B — Live audio bridge · *you in the loop*
+
+- **Build (backend):** binary `/ws/audio/{simDeviceId}` endpoints; uplink
+  `AudioMixer(100 ms)` → `UdpAudioServer.Send` (with MTU fragmentation); downlink
+  `UdpAudioServer` → `AudioMixer(100 ms)` → WS; wire sim-device endpoints via
+  `add_endpoint` / `remove_endpoint`. Frames are 4-byte BE seq + PCM16 (D6).
+- **Build (front-end):** `AudioContext({ sampleRate: 16000 })`; capture `AudioWorklet`
+  (PCM16 + seq index) → WS; WS → ~150 ms ring buffer → playback `AudioWorklet`;
+  mic/speaker device pickers.
+- **Verify (live):** two-way audio between a browser simulated device and a real device
+  — talk and listen; check for drift, dropouts, and echo. Expect iteration.
+- **Agent fit:** medium — needs a real mic + live devices; budget tuning rounds on
+  buffering. This is the one genuinely new piece of engineering.
+
+### Phase C — AEC test + visualization · *agent-friendly, you eyeball it*
+
+- **Build (backend):** AEC service (UDP 5140, record/play/clear of the sample WAVs);
+  recorder service (UDP 5139 → timestamped WAVs); spectrogram/wave producer reusing the
+  existing FFT/Hann/normalize compute, pushing `spectrogram` / `waveform` messages over
+  `/ws/events`.
+- **Build (front-end):** `<AecView>` (device picker, record/play/clear, waveform↔
+  spectrogram toggle) + the `<canvas>` scroll-and-append renderer (§8).
+- **Verify:** run the AEC tool against a real device; compare the live waveform and
+  spectrogram visually against the WPF app.
+- **Agent fit:** high — DSP is reused; verification is a visual comparison. Independent
+  of Phase B, so it can run in parallel once Phase A lands.
+
+### Phase D — Parity & cutover
+
+- Cross-check every feature in §1 against the desktop app; retire `IntercomTest` from the
+  solution once verified; run the `update-architecture` agent (the web backend is a new
+  daemon in the repo).
+
+---
+
+## 15. Out of scope
 
 The ChatGPT / OpenAI Realtime / MCP conversation stack lives entirely in
 `IntercomServer` and is unaffected. IntercomTest only ever *triggered* it via a device
