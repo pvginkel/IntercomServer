@@ -60,8 +60,43 @@ select {
   max-width: 280px;
 }
 
-.row.error {
+.gate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 16px;
+}
+
+.gate-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 28px 32px;
+  max-width: 440px;
+  text-align: center;
+}
+
+.gate-box h1 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+.gate-box p {
+  color: var(--muted);
+  margin: 0 0 18px;
+}
+
+.gate-error {
   color: #b42318;
+  margin: 16px 0 8px !important;
+}
+
+.gate-skip {
+  display: block;
+  margin: 0 auto;
   font-size: 13px;
 }
 

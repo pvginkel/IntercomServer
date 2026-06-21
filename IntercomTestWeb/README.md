@@ -17,15 +17,18 @@ architecture and the phase plan.
   byte-identical to the UDP frame. Mic is streamed only while the device's `recording` state is set,
   matching the WPF behavior.
 - JSON-file persistence: `data/Devices.json` (sim devices) and `data/settings.json` (auto-accept).
-- React UI: console with the toolbar, real-device cards, sim-device cards (mic/speaker pickers +
-  enable-audio toggle), and the audio-config dialog.
+- React UI: a one-time audio gate (a single "Enable audio & continue" prompt for the whole app,
+  since browsers require a user gesture for mic + AudioContext), then the console with the toolbar,
+  real-device cards, sim-device cards (mic/speaker pickers; audio is forced on once the gate passes),
+  and the audio-config dialog.
 
 Deferred: the AEC tool + spectrogram/recorder (Phase C).
 
 > **Mic access needs a secure context.** Browsers only expose `getUserMedia`/device labels over HTTPS
-> or `localhost`. Over plain HTTP to a LAN hostname the **Enable Audio** button fails. Use the
-> operator's TLS termination (D12), or `http://localhost:8080/` during dev. Output-device selection
-> uses `AudioContext.setSinkId` (Chrome); other browsers fall back to the default sink.
+> or `localhost`. Over plain HTTP to a LAN hostname the audio gate fails (with a "Continue without
+> audio" escape that leaves the rest of the UI usable). Use the operator's TLS termination (D12), or
+> `http://localhost:8080/` during dev. Output-device selection uses `AudioContext.setSinkId` (Chrome);
+> other browsers fall back to the default sink.
 
 ## Running
 

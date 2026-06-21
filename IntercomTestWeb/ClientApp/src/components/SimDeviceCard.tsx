@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { SimDevice } from '../store';
 import { Led, useLedBlink } from './Led';
 import { useSimAudio } from '../useSimAudio';
+import { useAudioReady } from './AudioGate';
 
 export function SimDeviceCard({ device }: { device: SimDevice }) {
   const [busy, setBusy] = useState(false);
@@ -10,7 +11,8 @@ export function SimDeviceCard({ device }: { device: SimDevice }) {
   const redOn = useLedBlink(device.ledRed);
   const greenOn = useLedBlink(device.ledGreen);
 
-  const audio = useSimAudio(device.id, !!state?.recording);
+  const audioReady = useAudioReady();
+  const audio = useSimAudio(device.id, !!state?.recording, audioReady);
 
   const run = (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -68,18 +70,16 @@ export function SimDeviceCard({ device }: { device: SimDevice }) {
             onChange={audio.setSpeakerId}
           />
         </div>
-        <div className="row buttons">
-          <button
-            className={audio.enabled ? 'primary' : undefined}
-            onClick={() => audio.setEnabled(!audio.enabled)}
-          >
-            {audio.enabled ? 'Audio On' : 'Enable Audio'}
-          </button>
-          {audio.enabled && (
+        <div className="row">
+          <span className="label">Audio</span>
+          {audio.error ? (
+            <span className="status bad">{audio.error}</span>
+          ) : audioReady ? (
             <span className="status ok">live · {state?.recording ? 'mic streaming' : 'mic idle'}</span>
+          ) : (
+            <span className="status">off</span>
           )}
         </div>
-        {audio.error && <div className="row error">{audio.error}</div>}
       </div>
       <div className="card-actions">
         <button disabled={busy} onClick={() => run(() => api.removeSimDevice(device.id))}>
