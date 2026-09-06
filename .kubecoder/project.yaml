@@ -1,0 +1,44 @@
+# Curated automation entry points for IntercomServer.
+# Reference: https://kubecoder.home/help/reference/project-yaml/
+#
+# Every verb names IntercomServer/IntercomServer.csproj and never
+# IntercomServer.sln. The solution also carries IntercomTest, a net9.0-windows
+# WPF project that cannot build on Linux (see that component below), so a
+# solution-wide build is red here by construction. This mirrors CI, which
+# restores and publishes the one csproj as well. IntercomServer.Utils is a
+# ProjectReference of that csproj and so builds through it — it needs no
+# component of its own.
+
+projects:
+  root:
+    description: >-
+      IntercomServer — the .NET 9 intercom daemon: MQTT device control, a UDP
+      audio server, and a ChatGPT realtime voice bridge with MCP tools.
+    # The main build-and-deploy pipeline. AaC/IntercomServer is a second job on
+    # this repo; it runs the architecture producer wired up as `lint:` below.
+    jenkins: Firmware/IntercomServer
+    setup: cexec dotnet dotnet restore IntercomServer/IntercomServer.csproj
+    build: cexec dotnet dotnet build IntercomServer/IntercomServer.csproj -c Release
+    # test: unset — the repo has no automated tests. IntercomTest is an
+    # interactive WPF harness, not a suite, and there is no test project.
+    #
+    # `lint:` is the repo's own architecture validator, the same command
+    # Jenkinsfile.architecture runs. No code linter is configured in this repo
+    # (no .editorconfig analyzer set, no dotnet-format settings), so this is the
+    # one gate there is. It is a network call: it POSTs the artifact to
+    # https://architecture.webathome.org/api/validate, so the gate is only as
+    # available as that service.
+    lint: ./scripts/arch-validate.py docs/architecture/*.yaml
+
+  IntercomTest:
+    description: >-
+      Windows-only WPF test harness for driving intercom devices by hand. Not
+      built in this environment.
+    # No verbs on purpose. IntercomTest.csproj targets net9.0-windows with
+    # <UseWPF>true</UseWPF> and does not set <EnableWindowsTargeting>, so on
+    # Linux a restore of it fails outright ("... is not compatible with
+    # net9.0-windows") before any compile happens. Making it at least restore
+    # and compile-check here would mean adding EnableWindowsTargeting to the
+    # csproj plus the Windows Desktop reference packs, which is a change to the
+    # product for the environment's benefit. CI does not build it either — the
+    # Jenkinsfile restores and publishes IntercomServer.csproj alone.

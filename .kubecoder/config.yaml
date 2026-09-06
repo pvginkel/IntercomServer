@@ -1,0 +1,24 @@
+# Environment shape for IntercomServer.
+# Reference: https://kubecoder.home/help/reference/config-yaml/
+#
+# Keys not spelled out here take their documented defaults — in particular
+# `cwd:`, which absent means this repo's own directory, and `repos:`, since
+# nothing is built against a sibling checkout.
+
+capabilities:
+  github: rw
+
+tools:
+  # The .NET 8 and 9 SDKs side by side. Everything here targets net9.0 and there
+  # is no global.json, so the SDK 9 in that sidecar is what builds. The memory
+  # limit and the persistent `.nuget` package cache are properties of the
+  # catalog entry, so they are deliberately not restated here.
+  - use: dotnet
+
+# The repo ships a Dockerfile: a runtime image laid over the `publish/` output
+# of `dotnet publish`. Jenkins builds it with helmCharts.kaniko; this opt-in is
+# what makes the same build possible from inside the environment.
+imageBuilder: true
+
+setup:
+  - kc project setup
