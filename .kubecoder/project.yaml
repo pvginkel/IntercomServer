@@ -34,11 +34,20 @@ projects:
     description: >-
       Windows-only WPF test harness for driving intercom devices by hand. Not
       built in this environment.
-    # No verbs on purpose. IntercomTest.csproj targets net9.0-windows with
-    # <UseWPF>true</UseWPF> and does not set <EnableWindowsTargeting>, so on
-    # Linux a restore of it fails outright ("... is not compatible with
-    # net9.0-windows") before any compile happens. Making it at least restore
-    # and compile-check here would mean adding EnableWindowsTargeting to the
-    # csproj plus the Windows Desktop reference packs, which is a change to the
-    # product for the environment's benefit. CI does not build it either — the
-    # Jenkinsfile restores and publishes IntercomServer.csproj alone.
+    # No verbs on purpose, and this is not fixable from the repo. The project
+    # targets net9.0-windows with <UseWPF>true</UseWPF>, and the Linux .NET SDK
+    # ships no Microsoft.NET.Sdk.WindowsDesktop at all, so the build dies in
+    # Microsoft.NET.Sdk.targets with:
+    #
+    #   error MSB4019: The imported project ".../Sdks/
+    #   Microsoft.NET.Sdk.WindowsDesktop/targets/
+    #   Microsoft.NET.Sdk.WindowsDesktop.targets" was not found.
+    #
+    # Restore succeeds — it is the build that cannot run — and
+    # /p:EnableWindowsTargeting=true does not help: that property governs
+    # restoring Windows targeting packs, not the absent WindowsDesktop SDK.
+    # Verified against SDK 9.0.118 in the `dotnet` toolchain. Building WPF
+    # needs Windows, which is also why CI does not build it: the Jenkinsfile
+    # restores and publishes IntercomServer.csproj alone. Do not point a
+    # solution-wide `dotnet build IntercomServer.sln` at this — it is red for
+    # exactly this one project.

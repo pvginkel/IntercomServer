@@ -2,6 +2,8 @@
 /*/bin
 /*/obj
 /tmp
+# `dotnet publish ... -o publish` output; the Dockerfile's build context.
+/publish
 *.user
 *.suo
 launchSettings.json

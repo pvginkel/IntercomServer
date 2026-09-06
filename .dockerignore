@@ -28,3 +28,13 @@ README.md
 !.git/config
 !.git/packed-refs
 !.git/refs/heads/**
+
+# Runtime and scratch directories that only ever exist in a dev environment.
+# CI builds from a clean clone and never sees them, so their absence there
+# hides the cost; in an environment where the daemon has run, `data/` grows
+# with the model's memories. The image's only COPY is `publish`, so nothing
+# below is ever read by the build.
+/data
+/tmp
+
+# NOTE: do not add `publish/` here. `COPY publish app/` is the whole image.
