@@ -19,6 +19,3 @@ tools:
 # of `dotnet publish`. Jenkins builds it with helmCharts.kaniko; this opt-in is
 # what makes the same build possible from inside the environment.
 imageBuilder: true
-
-setup:
-  - kc project setup
