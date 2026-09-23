@@ -1,6 +1,7 @@
 library identifier: 'JenkinsPipelineUtils', changelog: false
 
 podTemplate(inheritFrom: 'jenkins-agent-large kaniko', containers: [
+    containerTemplates.k8s('k8s'),
     containerTemplate(name: 'dotnet-sdk', image: 'mcr.microsoft.com/dotnet/sdk:9.0', command: 'sleep', args: 'infinity', alwaysPullImage: true)
 ]) {
     node(POD_LABEL) {
@@ -26,8 +27,14 @@ podTemplate(inheritFrom: 'jenkins-agent-large kaniko', containers: [
             }
         }
 
-        stage('Redeploy IntercomServer') {
-            cicd.helmDeploy()
+        // The build hands its image to Argo CD by pinning it in the deploy repo (argo-cd D53);
+        // Argo syncs the commit. HelmCharts no longer deploys this app.
+        stage('Write image pins') {
+            container('k8s') {
+                cicd.writeVersionPins(repo: 'pvginkel/IntercomDeploy', pins: [
+                    'config/prd/values.yaml': ['images.intercomServer': ":${currentBuild.number}"]
+                ])
+            }
         }
     }
 }
