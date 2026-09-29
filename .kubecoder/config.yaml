@@ -14,6 +14,8 @@ tools:
   # limit and the persistent `.nuget` package cache are properties of the
   # catalog entry, so they are deliberately not restated here.
   - use: dotnet
+  # arch-validate, the architecture artifact's lint gate.
+  - use: aac-tools
 
 # The repo ships a Dockerfile: a runtime image laid over the `publish/` output
 # of `dotnet publish`. Jenkins builds it with helmCharts.kaniko; this opt-in is

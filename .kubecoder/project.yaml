@@ -22,13 +22,13 @@ projects:
     # test: unset — the repo has no automated tests. IntercomTest is an
     # interactive WPF harness, not a suite, and there is no test project.
     #
-    # `lint:` is the repo's own architecture validator, the same command
+    # `lint:` is the aac-tools toolchain's architecture validator, the same command
     # Jenkinsfile.architecture runs. No code linter is configured in this repo
     # (no .editorconfig analyzer set, no dotnet-format settings), so this is the
     # one gate there is. It is a network call: it POSTs the artifact to
     # https://architecture.webathome.org/api/validate, so the gate is only as
     # available as that service.
-    lint: ./scripts/arch-validate.py docs/architecture/*.yaml
+    lint: cexec aac-tools arch-validate docs/architecture/*.yaml
 
   IntercomTest:
     description: >-
