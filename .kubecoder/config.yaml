@@ -18,6 +18,6 @@ tools:
   - use: aac-tools
 
 # The repo ships a Dockerfile: a runtime image laid over the `publish/` output
-# of `dotnet publish`. Jenkins builds it with helmCharts.kaniko; this opt-in is
+# of `dotnet publish`. Jenkins builds it with helmCharts.kaniko2; this opt-in is
 # what makes the same build possible from inside the environment.
 imageBuilder: true

@@ -1,39 +1,67 @@
+// Publishes IntercomServer with the .NET 9 SDK, builds the intercom-server image over that output,
+// and pins it into IntercomDeploy, which Argo CD syncs to prd.
+//
+// Controller config:
+//   - Job: Firmware/IntercomServer
+//   - SCM: pvginkel/IntercomServer, branch main
+//   - Script Path: Jenkinsfile
+
 library identifier: 'JenkinsPipelineUtils', changelog: false
 
-podTemplate(inheritFrom: 'jenkins-agent-large kaniko', containers: [
-    containerTemplates.k8s('k8s'),
-    containerTemplate(name: 'dotnet-sdk', image: 'mcr.microsoft.com/dotnet/sdk:9.0', command: 'sleep', args: 'infinity', alwaysPullImage: true)
-]) {
-    node(POD_LABEL) {
-        stage('Build IntercomServer') {
-            dir('IntercomServer') {
-                git branch: 'main',
-                    credentialsId: '5f6fbd66-b41c-405f-b107-85ba6fd97f10',
-                    url: 'https://github.com/pvginkel/IntercomServer.git'
+pipeline {
+    agent {
+        kubernetes {
+            inheritFrom 'jenkins-agent-large kaniko'
+            yamlMergeStrategy merge()
+            yaml podYaml(templates: ['k8s'], images: [[image: 'mcr.microsoft.com/dotnet/sdk:9.0', name: 'dotnet-sdk']])
+        }
+    }
 
+    options {
+        disableConcurrentBuilds(abortPrevious: true)
+        skipDefaultCheckout()
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+    }
+
+    triggers {
+        githubPush()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build intercom-server image') {
+            steps {
                 container('dotnet-sdk') {
-                    sh 'dotnet restore "./IntercomServer/IntercomServer.csproj"'
-                    dir('IntercomServer') {
-                        sh 'dotnet publish "./IntercomServer.csproj" -c Release -o ../publish /p:UseAppHost=false'
-                    }
+                    sh 'dotnet restore IntercomServer/IntercomServer.csproj'
+                    sh 'dotnet publish IntercomServer/IntercomServer.csproj -c Release -o publish /p:UseAppHost=false'
                 }
 
                 container('kaniko') {
-                    helmCharts.kaniko([
-                        "registry:5000/intercom-server:${currentBuild.number}",
-                        'registry:5000/intercom-server:latest'
-                    ])
+                    script {
+                        helmCharts.kaniko2(destinations: [
+                            "registry:5000/intercom-server:${currentBuild.number}",
+                            'registry:5000/intercom-server:latest',
+                        ])
+                    }
                 }
             }
         }
 
-        // The build hands its image to Argo CD by pinning it in the deploy repo (argo-cd D53);
-        // Argo syncs the commit. HelmCharts no longer deploys this app.
         stage('Write image pins') {
-            container('k8s') {
-                cicd.writeVersionPins(repo: 'pvginkel/IntercomDeploy', pins: [
-                    'config/prd/values.yaml': ['images.intercomServer': ":${currentBuild.number}"]
-                ])
+            steps {
+                container('k8s') {
+                    script {
+                        cicd.writeVersionPins(repo: 'pvginkel/IntercomDeploy', pins: [
+                            'config/prd/values.yaml': ['images.intercomServer': ":${currentBuild.number}"],
+                        ])
+                    }
+                }
             }
         }
     }
