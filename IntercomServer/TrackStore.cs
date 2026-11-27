@@ -124,13 +124,30 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
         }
     }
 
-    /// <summary>The track named <paramref name="name"/>, ignoring case, or null with none.</summary>
-    public async Task<Track?> FindAsync(string name, CancellationToken cancellationToken)
+    /// <summary>
+    /// The track named <paramref name="name"/>, ignoring case, with its file open for reading, or
+    /// null with none. The file reads on as it was opened when the track is renamed, moved or
+    /// deleted meanwhile.
+    /// </summary>
+    public async Task<(Track Track, FileStream Audio)?> OpenAsync(string name, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            return Find(await TracksAsync(cancellationToken), name);
+            if (Find(await TracksAsync(cancellationToken), name) is not { } track)
+                return null;
+
+            return (
+                track,
+                new FileStream(
+                    track.Path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 0,
+                    useAsync: true
+                )
+            );
         }
         finally
         {
@@ -394,7 +411,8 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
     private static string NotAudioDetail(NotAudio notAudio) =>
         $"The file is not audio the server can play: {notAudio.Reason}.";
 
-    private static TrackResult NotFound(string name) =>
+    /// <summary>The refusal of a call naming <paramref name="name"/>, which no track has.</summary>
+    public static TrackResult NotFound(string name) =>
         TrackResult.Refused(TrackRefusal.NotFound, $"There is no track named '{name}'.");
 
     private TrackResult Taken(string name, string holder) =>

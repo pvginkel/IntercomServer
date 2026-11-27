@@ -286,7 +286,7 @@ public sealed class TrackStoreTests
         Assert.Equal(["Rain on the skylight.m4a"], harness.AmbientFiles(folder));
         Assert.Equal(recording, await File.ReadAllBytesAsync(track.Path, Cancellation));
         Assert.Equal(track, Assert.Single(await harness.TrackStore().ListAsync(Cancellation)));
-        Assert.Null(await harness.TrackStore().FindAsync("Rain", Cancellation));
+        Assert.Null(await harness.TrackStore().OpenAsync("Rain", Cancellation));
     }
 
     [Fact]
@@ -401,15 +401,38 @@ public sealed class TrackStoreTests
         var rain = await harness.UploadAsync("Rain", await Tracks.RecordingAsync("m4a", Length));
         await harness.UploadAsync("Snow", await Tracks.RecordingAsync("wav", Length));
 
-        var found = await harness.TrackStore().FindAsync("rAIN", Cancellation);
+        var found = Assert.NotNull(await harness.TrackStore().OpenAsync("rAIN", Cancellation));
+        await using var audio = found.Audio;
         var disabled = await harness.TrackStore().UpdateAsync("rain", null, false, Cancellation);
         var deleted = await harness.TrackStore().DeleteAsync("SNOW", Cancellation);
 
-        Assert.Equal(rain.Track, found);
+        Assert.Equal(rain.Track, found.Track);
         Assert.Equal("Rain", disabled.Track?.Name);
         Assert.Equal("Snow", deleted.Track?.Name);
         Assert.Equal(["Rain.m4a"], harness.AmbientFiles("disabled"));
         Assert.Empty(harness.AmbientFiles("enabled"));
+    }
+
+    [Fact]
+    public async Task An_opened_track_reads_on_as_it_was_opened_once_it_is_renamed_disabled_and_deleted()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var recording = await Tracks.RecordingAsync("m4a", Length);
+        await harness.UploadAsync("Rain", recording);
+
+        var opened = Assert.NotNull(await harness.TrackStore().OpenAsync("Rain", Cancellation));
+        await using var audio = opened.Audio;
+        var changed = await harness.TrackStore().UpdateAsync("Rain", "Snow", false, Cancellation);
+        var deleted = await harness.TrackStore().DeleteAsync("Snow", Cancellation);
+        using var read = new MemoryStream();
+        await audio.CopyToAsync(read, Cancellation);
+
+        Assert.Equal(Path.Combine(harness.AmbientDirectory(), "enabled", "Rain.m4a"), opened.Track.Path);
+        Assert.NotNull(changed.Track);
+        Assert.NotNull(deleted.Track);
+        Assert.Empty(harness.AmbientFiles("enabled"));
+        Assert.Empty(harness.AmbientFiles("disabled"));
+        Assert.Equal(recording, read.ToArray());
     }
 
     [Fact]
@@ -464,7 +487,7 @@ public sealed class TrackStoreTests
         await File.WriteAllBytesAsync(Path.Combine(disabled, "twin.wav"), await Tracks.RecordingAsync("wav", Length), Cancellation);
 
         var tracks = await harness.TrackStore().ListAsync(Cancellation);
-        var twin = await harness.TrackStore().FindAsync("Twin", Cancellation);
+        var twin = await harness.TrackStore().OpenAsync("Twin", Cancellation);
         var notes = await harness.TrackStore().DeleteAsync("Notes", Cancellation);
         var taken = await harness.UploadAsync("notes", recording);
 

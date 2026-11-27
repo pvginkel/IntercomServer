@@ -116,6 +116,7 @@ internal partial class Program
                                     // Every /api route takes a bearer token; a route asks for its role on top.
                                     var api = endpoints.MapGroup("/api").RequireAuthorization();
                                     endpoints.MapAppReleaseEndpoints(api);
+                                    api.MapTrackEndpoints();
                                 })
                         ),
                 // The aspnet image sets ASPNETCORE_HTTP_PORTS. The web host reads no ASPNETCORE_

@@ -9,6 +9,9 @@ internal static class Roles
 {
     /// <summary>Jenkins' service account, which publishes app releases.</summary>
     public const string Pipeline = "pipeline";
+
+    /// <summary>The app's user, who keeps the ambient tracks.</summary>
+    public const string User = "user";
 }
 
 /// <summary>
