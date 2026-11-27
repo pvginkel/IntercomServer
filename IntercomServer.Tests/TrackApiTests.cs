@@ -198,6 +198,11 @@ public sealed class TrackApiTests
                 { new StringContent("Rain"), "name" },
                 { new ByteArrayContent(recording), "file", "rain.m4a" },
             },
+            ["a name, then another field"] = new MultipartFormDataContent
+            {
+                { new StringContent("Rain"), "name" },
+                { new ByteArrayContent(recording), "audio", "rain.m4a" },
+            },
         };
 
         var answers = new Dictionary<string, (HttpStatusCode, string?)>();
@@ -484,10 +489,18 @@ public sealed class TrackApiTests
         var token = harness.UserToken();
         var recording = await Tracks.RecordingAsync(format, Length);
         using var uploaded = await harness.UploadTrackAsync(token, "Rain", recording);
+        // A disabled track is played on the phone too.
+        using var uploadedSnow = await harness.UploadTrackAsync(token, "Snow", recording);
+        using var disabledSnow = await harness.ChangeTrackAsync(token, "Snow", new { enabled = false });
 
         using var whole = await harness.GetTrackAudioAsync(token, "Rain");
         using var part = await harness.GetTrackAudioAsync(token, "Rain", new RangeHeaderValue(100, 199));
+        using var disabled = await harness.GetTrackAudioAsync(token, "Snow");
 
+        Assert.Equal(["Snow." + format], harness.AmbientFiles("disabled"));
+        Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+        Assert.Equal(contentType, disabled.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(recording, await disabled.Content.ReadAsByteArrayAsync(Cancellation));
         Assert.Equal(HttpStatusCode.OK, whole.StatusCode);
         Assert.Equal(contentType, whole.Content.Headers.ContentType?.MediaType);
         Assert.Equal(["bytes"], whole.Headers.AcceptRanges);
