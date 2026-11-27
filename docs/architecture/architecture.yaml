@@ -2,10 +2,11 @@ schemaVersion: "0.1"
 producer: intercom-server
 
 # Intercom Server — .NET container that relays audio between Intercom devices.
-# Purely MQTT-driven (no HTTP API): it subscribes to the intercom/server topics
-# and to the device topics under each prefix in DEVICES_TOPIC_PREFIXES
-# (intercom/client and toilet_automation by default), and relays/triggers
-# playback on devices, brokering the peer UDP audio.
+# MQTT-driven: it subscribes to the intercom/server topics and to the device
+# topics under each prefix in DEVICES_TOPIC_PREFIXES (intercom/client and
+# toilet_automation by default), and relays/triggers playback on devices,
+# brokering the peer UDP audio. Its web host also serves an HTTP API: /api,
+# behind Keycloak bearer tokens, and /updates, the app's update channel.
 #
 # The intercom protocol IS the MQTT topic contract (<prefix>/<id>/...,
 # intercom/server/...), shared verbatim with the intercom and ToiletAutomation
@@ -13,7 +14,8 @@ producer: intercom-server
 # exposed via an ApplicationInterface (the topic namespace) that the intercom and
 # ToiletAutomation devices consume.
 # The service rides the MQTT broker as transport (cap:pub-sub-broker), which the
-# server also consumes directly.
+# server also consumes directly. The HTTP API is a service of its own, exposed via
+# its interface, and its sign-in consumes the homelab IAM (cap:iam).
 #
 # environment/cluster stay unset — per-env placement is the deployer's job.
 
@@ -39,6 +41,15 @@ applicationServices:
       audio-endpoint brokering, spoken over an MQTT topic contract.
     introduced: 2025-02-17
     lifecycle: active
+  - id: svc:intercom-api,7b02318f-b85c-451c-81ea-6dcf0ac73e8b
+    label: Intercom HTTP API
+    summary: >-
+      HTTP API on the server's web host: /api, every call behind a Keycloak
+      bearer token and a client role of intercom-server (pipeline publishes app
+      releases), and /updates?action=version|download, unauthenticated, the
+      app's update channel.
+    introduced: 2026-11-27
+    lifecycle: active
 
 applicationInterfaces:
   - id: if:intercom-mqtt,89b96676-c3bb-4eb5-a00a-985e57f59475
@@ -49,6 +60,13 @@ applicationInterfaces:
       and intercom/server/...) that the intercom and ToiletAutomation devices use
       to register, receive control and the peer UDP endpoints to stream audio to.
     introduced: 2025-02-17
+    lifecycle: active
+  - id: if:intercom-http-api,b26a6cfe-20bb-4d14-9d80-02b13a4fc8fd
+    label: Intercom HTTP API
+    summary: >-
+      The HTTP endpoints of the server's web host that the Android app and
+      Jenkins call: /api with a Keycloak bearer token, /updates without one.
+    introduced: 2026-11-27
     lifecycle: active
 
 relations:
@@ -62,12 +80,30 @@ relations:
     target: svc:intercom,5914e568-7f39-461a-91fe-9981d5275fe1
     type: Assignment
 
+  # The server realizes its HTTP API, exposed via the HTTP interface.
+  - id: rel:intercom-server-realizes-api
+    source: app:intercom-server,c313fb20-b8df-4f6c-be1b-23af65e26705
+    target: svc:intercom-api,7b02318f-b85c-451c-81ea-6dcf0ac73e8b
+    type: Realization
+  - id: rel:intercom-http-api-if-assigned
+    source: if:intercom-http-api,b26a6cfe-20bb-4d14-9d80-02b13a4fc8fd
+    target: svc:intercom-api,7b02318f-b85c-451c-81ea-6dcf0ac73e8b
+    type: Assignment
+
   # Substitutable infra — MQTT broker (the transport), bound at deploy time via env.
   - id: rel:intercom-server-consumes-pub-sub
     source: app:intercom-server,c313fb20-b8df-4f6c-be1b-23af65e26705
     target: cap:pub-sub-broker
     type: Association
     boundBy: "env:MQTT_HOST"
+
+  # The API's sign-in: bearer tokens from the realm KEYCLOAK_ISSUER names, whose
+  # signing keys the server reads from it.
+  - id: rel:intercom-server-consumes-iam
+    source: app:intercom-server,c313fb20-b8df-4f6c-be1b-23af65e26705
+    target: cap:iam
+    type: Association
+    boundBy: "env:KEYCLOAK_ISSUER"
 
   # OpenAI API (owned by the architecture producer): the ChatGPT voice-assistant
   # bridge consumes it via the official OpenAI SDK at its hardcoded base URL, so

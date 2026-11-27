@@ -61,6 +61,22 @@ internal partial class Program
                 : new WebHostConfiguration().Port,
         };
 
+        var signInConfiguration = new SignInConfiguration
+        {
+            Issuer = env("KEYCLOAK_ISSUER"),
+            Audience = env("KEYCLOAK_AUDIENCE") is { Length: > 0 } audience
+                ? audience
+                : new SignInConfiguration().Audience,
+        };
+        signInConfiguration.Validate();
+
+        var dataConfiguration = new DataConfiguration
+        {
+            Directory = env("DATA_DIR") is { Length: > 0 } dataDir
+                ? dataDir
+                : new DataConfiguration().Directory,
+        };
+
         var builder = new HostBuilder()
             // The framework logs through Serilog too, its warnings and errors, and the address the
             // web host listens on. AddSerilog would add a rule of its own letting every level
@@ -78,9 +94,18 @@ internal partial class Program
             .ConfigureWebHost(
                 web =>
                     web.UseKestrel(kestrel => kestrel.ListenAnyIP(webHostConfiguration.Port))
-                        .ConfigureServices(services => services.AddRouting())
+                        .ConfigureServices(services => services.AddRouting().AddSignIn(signInConfiguration))
                         .Configure(app =>
-                            app.UseRouting().UseEndpoints(endpoints => endpoints.MapHealthEndpoints())
+                            app.UseRouting()
+                                .UseAuthentication()
+                                .UseAuthorization()
+                                .UseEndpoints(endpoints =>
+                                {
+                                    endpoints.MapHealthEndpoints();
+                                    // Every /api route takes a bearer token; a route asks for its role on top.
+                                    var api = endpoints.MapGroup("/api").RequireAuthorization();
+                                    endpoints.MapAppReleaseEndpoints(api);
+                                })
                         ),
                 // The aspnet image sets ASPNETCORE_HTTP_PORTS. The web host reads no ASPNETCORE_
                 // variable, so HTTP_PORT alone decides its port.
@@ -142,7 +167,7 @@ internal partial class Program
                         McpConfigFile = env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                             ? mcpFile
                             : "mcpservers.json",
-                        DataDirectory = env("DATA_DIR") is { Length: > 0 } dataDir ? dataDir : "data",
+                        DataDirectory = dataConfiguration.Directory,
                         DebugAudioDirectory = env("CHATGPT_DEBUG_AUDIO_DIR"),
                         MicGateThreshold = double.TryParse(
                             env("CHATGPT_MIC_GATE_THRESHOLD"),
@@ -175,6 +200,8 @@ internal partial class Program
                         Host = env("AUDIO_HOST"),
                     }
                 );
+                services.AddSingleton(dataConfiguration);
+                services.AddSingleton<AppReleaseStore>();
                 services.AddSingleton<Server>();
                 services.AddSingleton<DeviceManager>();
                 services.AddSingleton<StateManager>();

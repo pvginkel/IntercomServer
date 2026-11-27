@@ -1,5 +1,6 @@
 using System.Net;
 using IntercomServer.Utils;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http.Features;
@@ -12,7 +13,8 @@ namespace IntercomServer.Tests.Harness;
 
 /// <summary>
 /// The real server, composed as production composes it (<see cref="Program.CreateHostBuilder"/>),
-/// against a broker of its own, with its own ports and data directory. The server reads only the
+/// against a broker and a Keycloak realm of its own (<see cref="TestIssuer"/>), with its own ports
+/// and data directory. The server reads only the
 /// settings the harness gives it, never the process environment, so tests run side by side and
 /// nothing set where the suite runs reaches them: ChatGPT is off, as no API key is given.
 /// </summary>
@@ -26,6 +28,7 @@ internal sealed class ServerHarness : IAsyncDisposable
 
     private ServerHarness(
         TestBroker broker,
+        TestIssuer issuer,
         IHost host,
         int httpPort,
         string dataDirectory,
@@ -33,6 +36,7 @@ internal sealed class ServerHarness : IAsyncDisposable
     )
     {
         Broker = broker;
+        Issuer = issuer;
         _host = host;
         HttpPort = httpPort;
         DataDirectory = dataDirectory;
@@ -40,6 +44,9 @@ internal sealed class ServerHarness : IAsyncDisposable
     }
 
     public TestBroker Broker { get; }
+
+    /// <summary>The realm the server takes bearer tokens from, which mints the tests' tokens.</summary>
+    public TestIssuer Issuer { get; }
 
     /// <summary>The port the server's web host bound, on every address.</summary>
     public int HttpPort { get; }
@@ -61,7 +68,7 @@ internal sealed class ServerHarness : IAsyncDisposable
         $"{IPAddress.Loopback}:{Services.GetRequiredService<UdpAudioServer>().LocalEndPoint.Port}";
 
     /// <summary>
-    /// Starts a broker and the server, and returns once the server reports ready: connected to
+    /// Starts a broker, a realm and the server, and returns once the server reports ready: connected to
     /// the broker and subscribed. <paramref name="settings"/> adds to, or overrides, the
     /// settings the harness gives the server, by their environment variable names.
     /// <paramref name="services"/> replaces registrations of the server's composition, for what
@@ -76,15 +83,26 @@ internal sealed class ServerHarness : IAsyncDisposable
     )
     {
         var broker = await TestBroker.StartAsync();
-        var dataDirectory = Directory.CreateTempSubdirectory("intercom-server-tests-").FullName;
-
+        TestIssuer issuer;
         try
         {
-            return await StartServerAsync(broker, dataDirectory, settings, services, awaitReady);
+            issuer = await TestIssuer.StartAsync();
         }
         catch
         {
             await broker.DisposeAsync();
+            throw;
+        }
+        var dataDirectory = Directory.CreateTempSubdirectory("intercom-server-tests-").FullName;
+
+        try
+        {
+            return await StartServerAsync(broker, issuer, dataDirectory, settings, services, awaitReady);
+        }
+        catch
+        {
+            await broker.DisposeAsync();
+            await issuer.DisposeAsync();
             Directory.Delete(dataDirectory, recursive: true);
             throw;
         }
@@ -92,6 +110,7 @@ internal sealed class ServerHarness : IAsyncDisposable
 
     private static async Task<ServerHarness> StartServerAsync(
         TestBroker broker,
+        TestIssuer issuer,
         string dataDirectory,
         IReadOnlyDictionary<string, string?>? settings,
         Action<IServiceCollection>? services,
@@ -107,11 +126,20 @@ internal sealed class ServerHarness : IAsyncDisposable
             ["AUDIO_PORT"] = "0",
             ["AUDIO_HOST"] = IPAddress.Loopback.ToString(),
             ["DATA_DIR"] = dataDirectory,
+            ["KEYCLOAK_ISSUER"] = issuer.Issuer,
         };
         foreach (var (name, value) in settings ?? new Dictionary<string, string?>())
             serverSettings[name] = value;
 
         var builder = Program.CreateHostBuilder(name => serverSettings.GetValueOrDefault(name));
+        // The one thing no setting reaches: the server's channel to its realm trusts the
+        // suite's issuer's certificate.
+        builder.ConfigureServices(composition =>
+            composition.Configure<JwtBearerOptions>(
+                JwtBearerDefaults.AuthenticationScheme,
+                options => options.BackchannelHttpHandler = TestIssuer.CreateBackchannel()
+            )
+        );
         if (services != null)
             builder.ConfigureServices(services);
 
@@ -142,7 +170,7 @@ internal sealed class ServerHarness : IAsyncDisposable
 
             var homeAssistant = await broker.ConnectAsync("home-assistant");
 
-            return new ServerHarness(broker, host, httpPort, dataDirectory, homeAssistant);
+            return new ServerHarness(broker, issuer, host, httpPort, dataDirectory, homeAssistant);
         }
         catch
         {
@@ -208,6 +236,13 @@ internal sealed class ServerHarness : IAsyncDisposable
         return (response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
+    /// <summary>Sends <paramref name="request"/> to the server's web host, its URI a path such as <c>/api/…</c>.</summary>
+    public async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
+    {
+        request.RequestUri = new Uri($"http://{IPAddress.Loopback}:{HttpPort}{request.RequestUri}");
+        return await Http.SendAsync(request);
+    }
+
     private static async Task WaitUntilReady(int httpPort)
     {
         using var timeout = new CancellationTokenSource(Timeouts.Observe);
@@ -246,6 +281,7 @@ internal sealed class ServerHarness : IAsyncDisposable
         await ((IAsyncDisposable)_host).DisposeAsync();
 
         await Broker.DisposeAsync();
+        await Issuer.DisposeAsync();
 
         Directory.Delete(DataDirectory, recursive: true);
     }
