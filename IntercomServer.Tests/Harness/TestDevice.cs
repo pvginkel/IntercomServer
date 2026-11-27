@@ -51,10 +51,12 @@ internal sealed class TestDevice : IAsyncDisposable
     /// </summary>
     public string Endpoint => $"{AudioEndpoint.Address}:{AudioEndpoint.Port}";
 
-    /// <summary>How many audio packets the device has received so far.</summary>
+    /// <summary>How many audio packets have arrived and are not yet read: a packet a
+    /// <c>Next…</c> method or <see cref="TakeArrivedPackets"/> has taken is not counted.</summary>
     public int ReceivedPacketCount => _packets.Reader.Count;
 
-    /// <summary>How many commands the device has received so far.</summary>
+    /// <summary>How many commands have arrived and are not yet read: a command
+    /// <see cref="NextCommandAsync"/> or <see cref="ExpectCommandsAsync"/> has taken is not counted.</summary>
     public int ReceivedCommandCount => _commands.Reader.Count;
 
     public static async Task<TestDevice> ConnectAsync(TestBroker broker, string prefix, string deviceId)
