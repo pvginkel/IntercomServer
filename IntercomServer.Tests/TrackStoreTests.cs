@@ -521,6 +521,24 @@ public sealed class TrackStoreTests
         }
     }
 
+    // The web host takes requests before the store's start runs.
+    [Fact]
+    public async Task The_start_leaves_an_upload_of_its_own_process_in_progress()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var recording = await Tracks.RecordingAsync("m4a", Length);
+        var arriving = new HeldStream(recording, recording.Length / 2);
+        var uploading = harness.UploadAsync("Rain", arriving);
+        await arriving.Held.WaitAsync(Timeouts.Observe, Cancellation);
+
+        await harness.TrackStore().StartAsync(Cancellation);
+        arriving.Release();
+        var result = await uploading;
+
+        Assert.Equal("Rain", result.Track?.Name);
+        Assert.Equal(recording, await File.ReadAllBytesAsync(result.Track!.Path, Cancellation));
+    }
+
     [Fact]
     public async Task A_server_without_ffprobe_stops_at_its_start_saying_ffprobe_is_missing()
     {
