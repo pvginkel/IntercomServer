@@ -1,5 +1,7 @@
 using System.Net;
 using IntercomServer.Tests.Harness;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace IntercomServer.Tests;
 
@@ -130,6 +132,18 @@ public sealed class SignInTests
         );
 
         Assert.StartsWith("KEYCLOAK_ISSUER is required", refusal.Message);
+    }
+
+    [Fact]
+    public async Task The_server_starts_without_data_protections_hosted_service()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+
+        // Its key ring would warn at every start that its key is stored unencrypted.
+        Assert.DoesNotContain(
+            harness.Services.GetServices<IHostedService>(),
+            service => service.GetType().Namespace?.StartsWith("Microsoft.AspNetCore.DataProtection") == true
+        );
     }
 
     [Fact]
