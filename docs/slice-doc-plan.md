@@ -7,13 +7,17 @@ whole diff, in one pass.
 ## The surfaces
 
 1. **`docs/`** holds the topic docs:
+   - [`devices.md`](devices.md), the devices: how the server finds them under its topic prefixes,
+     the microphone, the doorbell's reach, what a device is sent (its format, packets and
+     counter), the built-in sounds and FFmpeg, and their environment variables. A slice that
+     changes any of them updates it.
    - [`CHATGPT_MCP.md`](CHATGPT_MCP.md), the ChatGPT bridge: how a conversation starts and ends,
      its environment variables, the prompt placeholders, the MCP server configuration and the
      memory store. A slice that changes any of them updates it.
    - The three procedure docs, [`change-discipline.md`](change-discipline.md),
      [`slice-test-plan.md`](slice-test-plan.md) and this one. A slice that changed how the repo is
-     changed, verified or documented updates the matching doc: the slice that adds the suite
-     updates step 1 of the test plan and the testing section of the change discipline.
+     changed, verified or documented updates the matching doc: a new test-suite convention goes in
+     the change discipline's testing section, and a new start line or check in the test plan.
    - A part of the server worth a page of its own (a new subsystem, such as a web host or the
      ambient player) gets a topic doc here, named for what it covers.
 2. **The architecture model, `docs/architecture/architecture.yaml`**, is hand-authored here. A slice

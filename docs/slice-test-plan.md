@@ -21,9 +21,10 @@ it; what a local boot would show, the suite shows with an in-process broker, and
 production can.
 
 **Standing rule, here and in every check against production: nothing audible in the house.** Never
-publish to the production broker's command topics (`intercom/server/set/…`,
-`intercom/client/<id>/set/…`), never ring the doorbell, never start a call, a conversation or a
-sound. Those are the operator's checks, named in the close-out. Everything below only reads.
+publish to the production broker's command topics (`intercom/server/set/…`, and
+`<prefix>/<id>/set/…` under every device prefix, `intercom/client` and `toilet_automation`), never
+ring the doorbell, never start a call, a conversation or a sound. Those are the operator's checks,
+named in the close-out. Everything below only reads.
 
 ## 0. Preconditions
 
@@ -36,13 +37,14 @@ cwd-bound.
 
 ```bash
 kc project build    # IntercomServer.csproj, never the solution
-kc project test     # the suite; exit 3, "no test statements — skipped", until it has one
+kc project test     # IntercomServer.Tests, against the real FFmpeg
 kc project lint     # arch-validate on docs/architecture/*.yaml, a network call
 ```
 
-Build and lint must exit 0. `kc project test` must exit 0 once the root component declares a
-`test:`; until then it exits 3 and prints `root: no test statements — skipped`, which is not a
-failure — say so in the evidence. Read each verb's own exit status, never a pipe's.
+All three must exit 0. Read each verb's own exit status, never a pipe's. The suite runs the
+`ffmpeg` that `kc project setup` installs in the `dotnet` sidecar, and a sidecar that restarted on
+its own comes back without it: the suite then fails on `FFmpeg is missing: …`, and
+`kc project setup` puts it back before the suite runs again.
 
 `lint` posts the artifact to the federation's validation service. A refusal is a finding; a
 network failure is *not verified*, reported as such, never passed.
@@ -125,19 +127,22 @@ for l in sys.stdin:
 A healthy start reads, within about ten seconds of the container starting:
 
 1. `Health endpoint listening on port 8080 (/healthz, /readyz)`, first;
-2. `ChatGPT enabled; devices will stream audio to <AUDIO_HOST>:5004`;
-3. `Received state for device 0x…` and `Received configuration for device 0x…`, one for each device:
+2. `Decoded the built-in sounds with FFmpeg: doorbell.mp3 3.10 s, rejected.mp3 1.65 s, ring.mp3
+   6.26 s`, the proof that the image's FFmpeg works: a server whose FFmpeg is missing or cannot
+   decode stops here, naming the cause;
+3. `ChatGPT enabled; devices will stream audio to <AUDIO_HOST>:5004`;
+4. `Received state for device 0x…` and `Received configuration for device 0x…`, one for each device:
    the broker's retained messages, and the only proof of the MQTT connection, which succeeds
    silently;
-4. `Registered <N> MCP tool(s) across 6 server(s)`, `<N>` varying with the MCP servers.
+5. `Registered <N> MCP tool(s) across 6 server(s)`, `<N>` varying with the MCP servers.
 
-A failure is any of: a line of the four missing; `Initial MQTT connection failed`; `MQTT connection
+A failure is any of: a line of the five missing; `Initial MQTT connection failed`; `MQTT connection
 lost` with no later `Reconnected to the MQTT server`; an `[ERR]` or `[WRN]` line not named as noise
 below; a container not ready or restarted.
 
 Known noise, not a finding: `Failed to connect to MCP server youtrack` (or `homeassistant`), a 502
 from that server's proxy; the server starts without its tools. A broker restart during the roll can
-delay step 3 until `Reconnected to the MQTT server`: judge by the end state.
+delay the `Received …` lines until `Reconnected to the MQTT server`: judge by the end state.
 
 After the start the log is silent until a device acts, so an empty window is not a failure. For a
 pod that is gone, Elasticsearch holds every line:

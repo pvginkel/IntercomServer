@@ -3,25 +3,31 @@
 The rules every code change in this repo obeys. This is the doc `.aiworkflowrc` names as
 `design_philosophy`: it is handed to every `code-writer`, `code-reviewer`, `plan-writer` and
 `plan-reviewer` the pipeline dispatches, and a reviewer cites it when sending work back. It states
-rules; what the server does is in its code and in [`CHATGPT_MCP.md`](CHATGPT_MCP.md), and the
-architecture model in [`architecture/architecture.yaml`](architecture/architecture.yaml).
+rules; what the server does is in its code, in [`devices.md`](devices.md) and
+[`CHATGPT_MCP.md`](CHATGPT_MCP.md), and the architecture model in
+[`architecture/architecture.yaml`](architecture/architecture.yaml).
 
 ## The wire contracts belong to the devices too
 
 Nothing outside this repo imports its code, but three surfaces are read by systems this repo does
 not own:
 
-- **MQTT**: the `intercom/client/<id>/…` topics the devices publish and the `…/set/…` topics the
-  server publishes back (`Server.cs`, `Device.cs`), and `intercom/server/set/…`, which Home
-  Assistant publishes. Topic names, payload shapes, casing and enum strings are shared verbatim
-  with the device firmware. The JSON shapes are the DTOs in `IntercomServer.Utils`.
-- **UDP audio**: PCM mono, 16 kHz, 16-bit, in 20 ms chunks, each datagram a 4-byte big-endian packet
-  index and its payload (`AudioSender.cs`, `Constants.cs`), paced in real time because the devices'
-  jitter buffers are small (`AudioStreaming.cs`).
-- **The deploy**: every environment variable, prompt file and secret name the server reads is set by
-  pvginkel/IntercomDeploy's chart. A new or renamed one changes the chart in the same slice, or the
-  pod crash-loops on the next roll: `ChatGptConfiguration.Validate` refuses a missing close-out
-  prompt at startup.
+- **MQTT**: the `<prefix>/<id>/…` topics the devices publish under each prefix in
+  `DEVICES_TOPIC_PREFIXES` (`intercom/client` and `toilet_automation` by default), the `…/set/…`
+  topics the server publishes back under the device's own prefix (`Server.cs`, `Device.cs`), and
+  `intercom/server/set/…`, which Home Assistant publishes. Topic names, payload shapes, casing and
+  enum strings are shared verbatim with the intercom and ToiletAutomation firmware. The JSON shapes
+  are the DTOs in `IntercomServer.Utils`.
+- **UDP audio**: PCM in the format each device advertises as `audio_formats.out` (`Device.cs`), in
+  20 ms chunks split past 1468 bytes, each datagram a 4-byte big-endian packet index from the
+  device's own counter and its payload (`AudioSender.cs`), paced in real time because the devices'
+  jitter buffers are small (`AudioStreaming.cs`). [`devices.md`](devices.md) has the details.
+- **The deploy**: pvginkel/IntercomDeploy's chart sets the environment variables, prompt files and
+  secret names production runs with. A setting the server has no default for, new or renamed,
+  changes the chart in the same slice, or the pod crash-loops on the next roll:
+  `ChatGptConfiguration.Validate` refuses a missing close-out prompt at startup. A setting whose
+  default is in code, such as `HEALTH_PORT` or `DEVICES_TOPIC_PREFIXES`, changes the chart only
+  when production needs another value.
 
 Inside this repo, **fix the callers**: no shim, adapter or second code path that keeps an old shape
 alive. A change to MQTT or UDP that the firmware must follow is a breaking change to a consumer
@@ -64,18 +70,25 @@ call state machine comes after a test that pins today's behaviour of what it tou
 listener, a temporary data directory, the real FFmpeg, and tokens signed by a key the tests make.
 The ChatGPT bridge's conversation with OpenAI is the one part not covered.
 
-The suite does not exist yet. Until it does, `kc project test` has no statement to run, and what
-proves a change is the build, the lint and the test phase's check of the production rollout
-([`slice-test-plan.md`](slice-test-plan.md)). The slice that adds the suite also adds its `test:`
-verb and the Jenkins test stage.
+**The suite** is `IntercomServer.Tests`, on xUnit v3. `kc project test` runs it in the `dotnet`
+sidecar, with the FFmpeg `kc project setup` installs there, and the Jenkins `Test` stage installs
+FFmpeg and runs it before the image is built, so a red suite never deploys. A test starts the real server, composed as production composes
+it, with `await using var harness = await ServerHarness.StartAsync(settings)`: a broker, ports and
+data directory of its own, and only the settings the harness gives it, which `settings` adds to or
+overrides by their environment variable names, so ChatGPT is off. It drives the server as the
+devices and Home Assistant do, through the parts in `IntercomServer.Tests/Harness/`. Test classes
+run in parallel, and a timing pin joins `PacingTests`, a collection that runs alone. Nothing marks
+a message handled, so a check that something was *not* sent stands on a later positive
+observation: a control device the same sound reached, or `ServerHarness.AssertSentNoCommandAsync`.
 
 ## Build the project, never the solution
 
-Every build names `IntercomServer/IntercomServer.csproj`. The solution also carries IntercomTest, a
-Windows WPF harness that cannot build on Linux, so a solution-wide build is red by construction.
-`.kubecoder/project.yaml` says why at length. IntercomTest is the operator's manual tool, not a
-suite: a change keeps `IntercomServer.Utils`, which it shares, compiling for it, and nothing here
-verifies that.
+Every build names a project: `IntercomServer/IntercomServer.csproj`, or the suite's
+`IntercomServer.Tests/IntercomServer.Tests.csproj`, which references it. The solution also carries
+IntercomTest, a Windows WPF harness that cannot build on Linux, so a solution-wide build is red by
+construction. `.kubecoder/project.yaml` says why at length. IntercomTest is the operator's manual
+tool, not a suite: a change keeps `IntercomServer.Utils`, which it shares, compiling for it, and
+nothing here verifies that.
 
 ## The architecture model is hand-authored
 

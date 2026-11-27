@@ -2,13 +2,16 @@ schemaVersion: "0.1"
 producer: intercom-server
 
 # Intercom Server — .NET container that relays audio between Intercom devices.
-# Purely MQTT-driven (no HTTP API): it subscribes to intercom/server|client
-# topics and relays/triggers playback on devices, brokering the peer UDP audio.
+# Purely MQTT-driven (no HTTP API): it subscribes to the intercom/server topics
+# and to the device topics under each prefix in DEVICES_TOPIC_PREFIXES
+# (intercom/client and toilet_automation by default), and relays/triggers
+# playback on devices, brokering the peer UDP audio.
 #
-# The intercom protocol IS the MQTT topic contract (intercom/client/<id>/...,
-# intercom/server/...), hardcoded in both the server and the device firmware.
-# It is modeled as the ApplicationService this server realizes, exposed via an
-# ApplicationInterface (the topic namespace) that the Intercom devices consume.
+# The intercom protocol IS the MQTT topic contract (<prefix>/<id>/...,
+# intercom/server/...), shared verbatim with the intercom and ToiletAutomation
+# device firmware. It is modeled as the ApplicationService this server realizes,
+# exposed via an ApplicationInterface (the topic namespace) that the intercom and
+# ToiletAutomation devices consume.
 # The service rides the MQTT broker as transport (cap:pub-sub-broker), which the
 # server also consumes directly.
 #
@@ -20,7 +23,7 @@ applicationComponents:
     summary: >-
       .NET service that orchestrates the home audio intercom: it subscribes to
       the intercom MQTT topics, relays call events, and triggers playback on the
-      Intercom devices.
+      intercom and ToiletAutomation devices.
     introduced: 2025-02-17
     lifecycle: active
     stereotype: SoftwareProduct
@@ -33,7 +36,7 @@ applicationServices:
     label: Intercom relay
     summary: >-
       The intercom call/relay service: device registration, call routing, and
-      audio-endpoint brokering, spoken over a fixed MQTT topic contract.
+      audio-endpoint brokering, spoken over an MQTT topic contract.
     introduced: 2025-02-17
     lifecycle: active
 
@@ -41,9 +44,10 @@ applicationInterfaces:
   - id: if:intercom-mqtt,89b96676-c3bb-4eb5-a00a-985e57f59475
     label: Intercom MQTT topic protocol
     summary: >-
-      The hardcoded MQTT topic namespace (intercom/client/<id>/state and /set/+,
-      intercom/server/...) that Intercom devices use to register, receive control
-      and the peer UDP endpoints to stream audio to.
+      The MQTT topic namespace (<prefix>/<id>/state, /configuration and /set/+
+      under each device prefix, intercom/client and toilet_automation by default,
+      and intercom/server/...) that the intercom and ToiletAutomation devices use
+      to register, receive control and the peer UDP endpoints to stream audio to.
     introduced: 2025-02-17
     lifecycle: active
 

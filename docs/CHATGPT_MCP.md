@@ -7,7 +7,9 @@ and you can give that assistant extra abilities by plugging in **MCP servers**.
 ## How a user starts a conversation
 
 - **Long‑press** the button on a device that is idle (not in a call, not ringing,
-  not being dialed) → the device starts a ChatGPT voice conversation.
+  not being dialed) → the device starts a ChatGPT voice conversation. Only a device
+  with a microphone can: one that advertises an `audio_formats.in` (see
+  [`devices.md`](devices.md)). The button of a device without one does nothing.
 - **Short‑press** that same device's button, or simply say *"goodbye"*, ends it.
 - Conversations are **per device and concurrent**: several devices can talk to ChatGPT
   at the same time, and other devices can still call each other. The only restriction is
@@ -17,7 +19,10 @@ and you can give that assistant extra abilities by plugging in **MCP servers**.
 Under the hood the server tells the device to stream its microphone (over UDP) to
 an audio endpoint the server exposes, bridges that audio to OpenAI, and streams the
 model's spoken reply back to the device over the same path used for ring tones.
-Audio is resampled between the intercom's 16 kHz and OpenAI's 24 kHz automatically.
+Audio is resampled between OpenAI's 24 kHz and the formats the device advertises: its
+microphone's `audio_formats.in` and its `audio_formats.out`. Both must be mono 16-bit PCM
+at 8 to 192 kHz; for a device that advertises anything else, the server logs it and starts
+no conversation.
 
 ## Enabling the feature
 
@@ -36,7 +41,7 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
 | `DATA_DIR` | no | `data` | Root folder for the server's persistent data. The model's memories live in a `memories/` sub-folder (see *Memory* below). |
-| `CHATGPT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the 16 kHz stream sent to the device). |
+| `CHATGPT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the stream sent to the device, at its rate). |
 
 The system prompt may include the placeholder **`{NOW}`**, which is replaced at the start of
 each conversation with the current date and time as a natural, culture-specific long

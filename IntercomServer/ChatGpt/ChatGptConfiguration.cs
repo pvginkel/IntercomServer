@@ -63,8 +63,8 @@ internal class ChatGptConfiguration
 
     /// <summary>
     /// Debugging aid: when set, the conversation's audio is also written to WAV files in this
-    /// directory — the raw 24 kHz stream received from OpenAI, the 16 kHz stream sent to the
-    /// device, and the raw 16 kHz device microphone. Leave empty to disable.
+    /// directory — the raw 24 kHz stream received from OpenAI, the stream sent to the device at
+    /// its output rate, and the raw device microphone at its input rate. Leave empty to disable.
     /// </summary>
     public string? DebugAudioDirectory { get; init; }
 
