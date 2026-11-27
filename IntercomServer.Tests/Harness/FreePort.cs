@@ -5,17 +5,14 @@ namespace IntercomServer.Tests.Harness;
 
 /// <summary>
 /// TCP ports for what a test starts that cannot bind port 0 and report the port it got: the
-/// in-process broker and the server's health endpoint. A port is free when it is picked, and
-/// another socket can take it before the test binds it, so a start that finds its port taken
-/// picks another (<see cref="StartAsync{T}"/>). A port picked and left unbound is one nothing
-/// listens on, for a server pointed away from its broker.
+/// in-process broker. A port is free when it is picked, and another socket can take it before
+/// the test binds it, so a start that finds its port taken picks another
+/// (<see cref="StartAsync{T}"/>). A port picked and left unbound is one nothing listens on, for
+/// a server pointed away from its broker.
 /// </summary>
 internal static class FreePort
 {
     private const int Attempts = 5;
-
-    // EADDRINUSE: on Linux, HttpListener reports the errno of its failed bind.
-    private const int LinuxAddressInUse = 98;
 
     /// <summary>
     /// Runs <paramref name="start"/> on a free port, and again on another one while the port
@@ -37,8 +34,6 @@ internal static class FreePort
 
     public static int Pick()
     {
-        // Dual mode on the IPv6 wildcard, so the port is free on every address: the health
-        // endpoint listens on all of them.
         var listener = TcpListener.Create(0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -50,7 +45,6 @@ internal static class FreePort
         ex switch
         {
             SocketException socket => socket.SocketErrorCode == SocketError.AddressAlreadyInUse,
-            HttpListenerException listener => listener.ErrorCode == LinuxAddressInUse,
             _ => ex.InnerException != null && IsAddressInUse(ex.InnerException),
         };
 }

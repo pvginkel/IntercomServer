@@ -55,7 +55,7 @@ public sealed class HarnessTests
         await using var second = await starting[1];
 
         Assert.NotEqual(first.Broker.Port, second.Broker.Port);
-        Assert.NotEqual(first.HealthPort, second.HealthPort);
+        Assert.NotEqual(first.HttpPort, second.HttpPort);
         Assert.NotEqual(first.DataDirectory, second.DataDirectory);
 
         // The same device id on both: each server knows only the one on its own broker.

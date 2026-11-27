@@ -2,10 +2,10 @@
 using IntercomServer;
 using IntercomServer.ChatGpt;
 using IntercomServer.Utils;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using MQTTnet;
 using Serilog;
+using Serilog.Extensions.Logging;
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
@@ -13,7 +13,9 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.Debug()
     .CreateLogger();
 
-await Program.CreateHostBuilder(Environment.GetEnvironmentVariable).RunConsoleAsync();
+await Program
+    .CreateHostBuilder(Environment.GetEnvironmentVariable)
+    .RunConsoleAsync(options => options.SuppressStatusMessages = true);
 
 internal partial class Program
 {
@@ -52,24 +54,44 @@ internal partial class Program
             return configuration;
         }
 
-        return new HostBuilder().ConfigureServices(
+        var webHostConfiguration = new WebHostConfiguration
+        {
+            Port = env("HTTP_PORT") is { Length: > 0 } httpPort
+                ? int.Parse(httpPort)
+                : new WebHostConfiguration().Port,
+        };
+
+        var builder = new HostBuilder()
+            // The framework logs through Serilog too, its warnings and errors, and the address the
+            // web host listens on. AddSerilog would add a rule of its own letting every level
+            // through, which these filters cannot narrow.
+            .ConfigureLogging(logging =>
+                logging
+                    .SetMinimumLevel(LogLevel.Warning)
+                    .AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information)
+                    .AddProvider(new SerilogLoggerProvider())
+            )
+            // ConfigureWebHost registers the web host's hosted service, and hosted services start in
+            // registration order: the probes are answered from the start, while Service.StartAsync is
+            // still dialing the MQTT broker and discovering MCP servers (which can block). The sounds
+            // are decoded before Service connects, so nothing plays before they are.
+            .ConfigureWebHost(
+                web =>
+                    web.UseKestrel(kestrel => kestrel.ListenAnyIP(webHostConfiguration.Port))
+                        .ConfigureServices(services => services.AddRouting())
+                        .Configure(app =>
+                            app.UseRouting().UseEndpoints(endpoints => endpoints.MapHealthEndpoints())
+                        ),
+                // The aspnet image sets ASPNETCORE_HTTP_PORTS. The web host reads no ASPNETCORE_
+                // variable, so HTTP_PORT alone decides its port.
+                options => options.SuppressEnvironmentConfiguration = true
+            );
+
+        return builder.ConfigureServices(
             (context, services) =>
             {
-                // Start the health endpoint before Service so the liveness/readiness probes are answered
-                // immediately — including while Service.StartAsync is still dialing the MQTT broker and
-                // discovering MCP servers (which can block). Hosted services start in registration order.
-                // The sounds are decoded before Service connects, so nothing plays before they are.
-                services.AddHostedService<HealthEndpointService>();
                 services.AddHostedService(p => p.GetRequiredService<SoundLibrary>());
                 services.AddHostedService<Service>();
-                services.AddSingleton(
-                    new HealthEndpointConfiguration
-                    {
-                        Port = string.IsNullOrEmpty(env("HEALTH_PORT"))
-                            ? 8080
-                            : int.Parse(env("HEALTH_PORT")!),
-                    }
-                );
                 services.AddSingleton(
                     new ServerConfiguration
                     {

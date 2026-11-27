@@ -26,7 +26,7 @@ not own:
   secret names production runs with. A setting the server has no default for, new or renamed,
   changes the chart in the same slice, or the pod crash-loops on the next roll:
   `ChatGptConfiguration.Validate` refuses a missing close-out prompt at startup. A setting whose
-  default is in code, such as `HEALTH_PORT` or `DEVICES_TOPIC_PREFIXES`, changes the chart only
+  default is in code, such as `HTTP_PORT` or `DEVICES_TOPIC_PREFIXES`, changes the chart only
   when production needs another value.
 
 Inside this repo, **fix the callers**: no shim, adapter or second code path that keeps an old shape

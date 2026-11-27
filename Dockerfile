@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/runtime:9.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 
 # The server decodes its sounds with FFmpeg, and stops at its start without it. The base is
 # Debian and builds as root.
@@ -10,7 +10,8 @@ COPY publish app/
 
 WORKDIR /app
 
-# Liveness (/healthz) and readiness (/readyz) probes. Override with HEALTH_PORT.
+# The web host, with the liveness (/healthz) and readiness (/readyz) probes. Override with
+# HTTP_PORT; the base's ASPNETCORE_HTTP_PORTS is not read.
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "IntercomServer.dll"]

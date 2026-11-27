@@ -126,7 +126,7 @@ for l in sys.stdin:
 
 A healthy start reads, within about ten seconds of the container starting:
 
-1. `Health endpoint listening on port 8080 (/healthz, /readyz)`, first;
+1. `Now listening on: http://[::]:8080`, first: the web host;
 2. `Decoded the built-in sounds with FFmpeg: doorbell.mp3 3.10 s, rejected.mp3 1.65 s, ring.mp3
    6.26 s`, the proof that the image's FFmpeg works: a server whose FFmpeg is missing or cannot
    decode stops here, naming the cause;

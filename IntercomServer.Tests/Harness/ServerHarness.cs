@@ -1,5 +1,8 @@
 using System.Net;
 using IntercomServer.Utils;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MQTTnet;
@@ -24,21 +27,22 @@ internal sealed class ServerHarness : IAsyncDisposable
     private ServerHarness(
         TestBroker broker,
         IHost host,
-        int healthPort,
+        int httpPort,
         string dataDirectory,
         IMqttClient homeAssistant
     )
     {
         Broker = broker;
         _host = host;
-        HealthPort = healthPort;
+        HttpPort = httpPort;
         DataDirectory = dataDirectory;
         _homeAssistant = homeAssistant;
     }
 
     public TestBroker Broker { get; }
 
-    public int HealthPort { get; }
+    /// <summary>The port the server's web host bound, on every address.</summary>
+    public int HttpPort { get; }
 
     /// <summary>The server's <c>DATA_DIR</c>, a temporary directory removed with the harness.</summary>
     public string DataDirectory { get; }
@@ -94,50 +98,51 @@ internal sealed class ServerHarness : IAsyncDisposable
         bool awaitReady
     )
     {
-        var (host, healthPort) = await FreePort.StartAsync(async port =>
+        var serverSettings = new Dictionary<string, string?>
         {
-            var serverSettings = new Dictionary<string, string?>
-            {
-                ["MQTT_HOST"] = IPAddress.Loopback.ToString(),
-                ["MQTT_PORT"] = broker.Port.ToString(),
-                ["HEALTH_PORT"] = port.ToString(),
-                // Port 0: the UDP audio server binds whichever port is free.
-                ["AUDIO_PORT"] = "0",
-                ["AUDIO_HOST"] = IPAddress.Loopback.ToString(),
-                ["DATA_DIR"] = dataDirectory,
-            };
-            foreach (var (name, value) in settings ?? new Dictionary<string, string?>())
-                serverSettings[name] = value;
+            ["MQTT_HOST"] = IPAddress.Loopback.ToString(),
+            ["MQTT_PORT"] = broker.Port.ToString(),
+            // Port 0: the web host and the UDP audio server each bind whichever port is free.
+            ["HTTP_PORT"] = "0",
+            ["AUDIO_PORT"] = "0",
+            ["AUDIO_HOST"] = IPAddress.Loopback.ToString(),
+            ["DATA_DIR"] = dataDirectory,
+        };
+        foreach (var (name, value) in settings ?? new Dictionary<string, string?>())
+            serverSettings[name] = value;
 
-            var builder = Program.CreateHostBuilder(name => serverSettings.GetValueOrDefault(name));
-            if (services != null)
-                builder.ConfigureServices(services);
+        var builder = Program.CreateHostBuilder(name => serverSettings.GetValueOrDefault(name));
+        if (services != null)
+            builder.ConfigureServices(services);
 
-            var host = builder.Build();
-            try
-            {
-                using var timeout = new CancellationTokenSource(Timeouts.Observe);
-                await host.StartAsync(timeout.Token);
-            }
-            catch
-            {
-                // A start that failed after the health endpoint started leaves it listening.
-                await host.StopAsync();
-                await ((IAsyncDisposable)host).DisposeAsync();
-                throw;
-            }
+        var host = builder.Build();
+        int httpPort;
+        try
+        {
+            using var timeout = new CancellationTokenSource(Timeouts.Observe);
+            await host.StartAsync(timeout.Token);
 
-            return (host, port);
-        });
+            var address = host.Services.GetRequiredService<IServer>()
+                .Features.GetRequiredFeature<IServerAddressesFeature>()
+                .Addresses.Single();
+            httpPort = new Uri(address).Port;
+        }
+        catch
+        {
+            // A start that failed after the web host started leaves it listening.
+            await host.StopAsync();
+            await ((IAsyncDisposable)host).DisposeAsync();
+            throw;
+        }
 
         try
         {
             if (awaitReady)
-                await WaitUntilReady(healthPort);
+                await WaitUntilReady(httpPort);
 
             var homeAssistant = await broker.ConnectAsync("home-assistant");
 
-            return new ServerHarness(broker, host, healthPort, dataDirectory, homeAssistant);
+            return new ServerHarness(broker, host, httpPort, dataDirectory, homeAssistant);
         }
         catch
         {
@@ -199,14 +204,14 @@ internal sealed class ServerHarness : IAsyncDisposable
     /// <summary>Asks the server's health endpoint, as Kubernetes' probes do.</summary>
     public async Task<(HttpStatusCode Status, string Body)> GetHealthAsync(string path)
     {
-        using var response = await Http.GetAsync($"http://{IPAddress.Loopback}:{HealthPort}{path}");
+        using var response = await Http.GetAsync($"http://{IPAddress.Loopback}:{HttpPort}{path}");
         return (response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
-    private static async Task WaitUntilReady(int healthPort)
+    private static async Task WaitUntilReady(int httpPort)
     {
         using var timeout = new CancellationTokenSource(Timeouts.Observe);
-        var url = $"http://{IPAddress.Loopback}:{healthPort}/readyz";
+        var url = $"http://{IPAddress.Loopback}:{httpPort}/readyz";
 
         try
         {
