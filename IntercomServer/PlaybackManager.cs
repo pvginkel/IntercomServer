@@ -1,11 +1,13 @@
 ﻿using System.Net;
+using IntercomServer.Utils.Audio;
 using Serilog;
 
 namespace IntercomServer;
 
 /// <summary>
-/// Plays the built-in sounds, a playback of its own on each device: a sound started on some
-/// devices replaces what those devices were playing, and nothing else.
+/// Plays the built-in sounds, a playback of its own on each device, in the format the device
+/// advertises: a sound started on some devices replaces what those devices were playing, and
+/// nothing else.
 /// </summary>
 internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
 {
@@ -16,7 +18,8 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
 
     /// <summary>
     /// Plays <paramref name="fileName"/> on each of <paramref name="devices"/>. A device without an
-    /// endpoint the server can send to is logged and skipped, and the others play.
+    /// endpoint the server can send to, or a format it can produce, is logged and skipped, and the
+    /// others play.
     /// </summary>
     public void StartPlayback(
         IEnumerable<Device> devices,
@@ -40,6 +43,17 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
                 continue;
             }
 
+            if (device.OutputFormat is not { } format)
+            {
+                Logger.Warning(
+                    "Device {Device} advertises no audio format the server can produce ({Format}), so it does not play {Sound}",
+                    device.DeviceId,
+                    device.Configuration.AudioFormats?.Out,
+                    fileName
+                );
+                continue;
+            }
+
             var playback = CancellationTokenSource.CreateLinkedTokenSource(token);
             CancellationTokenSource? replaced;
 
@@ -51,30 +65,28 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
 
             replaced?.Cancel();
 
-            RunPlayback(
-                device.DeviceId,
-                endpoint,
-                sounds.Open(fileName),
-                configuration,
-                playback.Token
-            );
+            RunPlayback(device.DeviceId, endpoint, format, fileName, configuration, playback.Token);
         }
     }
 
     private async void RunPlayback(
         string deviceId,
         IPEndPoint endpoint,
-        Stream stream,
+        AudioFormat format,
+        string fileName,
         PlaybackConfiguration? configuration,
         CancellationToken cancellationToken
     )
     {
         try
         {
+            await using var stream = await sounds.OpenAsync(fileName, format, cancellationToken);
+
             await AudioStreaming.PlayAsync(
                 sender,
                 deviceId,
                 endpoint,
+                format,
                 stream,
                 configuration,
                 cancellationToken

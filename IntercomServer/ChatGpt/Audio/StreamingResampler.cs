@@ -5,8 +5,9 @@ namespace IntercomServer.ChatGpt.Audio;
 /// position and the trailing sample across calls, so consecutive buffers are
 /// resampled continuously without clicks at the boundaries.
 ///
-/// The intercom uses 16 kHz mono PCM16 while the OpenAI Realtime API uses
-/// 24 kHz mono PCM16, so one instance is used per direction per conversation.
+/// A device's microphone and speaker run at the rates it advertises, while the
+/// OpenAI Realtime API uses 24 kHz mono PCM16, so one instance is used per
+/// direction per conversation.
 /// Not thread-safe: each instance is driven from a single thread.
 /// </summary>
 internal sealed class StreamingResampler(int inputRate, int outputRate)

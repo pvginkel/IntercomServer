@@ -28,8 +28,9 @@ internal sealed class ConversationManager(
     public event EventHandler<Device>? SessionEnded;
 
     /// <summary>
-    /// Starts a conversation with <paramref name="device"/>. Returns false when the
-    /// feature is not configured, the device cannot be used, or it is already chatting.
+    /// Starts a conversation with <paramref name="device"/>, its microphone taken in the device's
+    /// input format and the replies sent in its output format. Returns false when the feature is
+    /// not configured, the device cannot be used, or it is already chatting.
     /// </summary>
     public async Task<bool> StartAsync(Device device)
     {
@@ -48,8 +49,20 @@ internal sealed class ConversationManager(
             return false;
         }
 
+        if (device.InputFormat is not { } inputFormat || device.OutputFormat is not { } outputFormat)
+        {
+            Logger.Warning(
+                "Cannot start ChatGPT conversation: device {Device} advertises no audio formats the server can take and produce ({Formats}).",
+                device.DeviceId,
+                device.Configuration.AudioFormats
+            );
+            return false;
+        }
+
         var conversation = new Conversation(
             device,
+            inputFormat,
+            outputFormat,
             configuration,
             mcp,
             webSearch,

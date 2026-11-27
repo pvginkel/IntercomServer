@@ -1,20 +1,23 @@
 using System.Diagnostics;
 using System.Net;
+using IntercomServer.Utils.Audio;
 
 namespace IntercomServer;
 
 internal static class AudioStreaming
 {
     /// <summary>
-    /// Streams PCM audio from <paramref name="stream"/> to the device <paramref name="deviceId"/>
-    /// at <paramref name="endpoint"/>, paced to real time so the device's (small) jitter buffer
-    /// is not overrun. This is the shared pacing used by both ring/doorbell playback and
+    /// Streams PCM audio in <paramref name="format"/> from <paramref name="stream"/> to the device
+    /// <paramref name="deviceId"/> at <paramref name="endpoint"/>, in chunks of
+    /// <see cref="Constants.AudioChunkSize"/>, paced to real time so the device's (small) jitter
+    /// buffer is not overrun. This is the shared pacing used by both ring/doorbell playback and
     /// ChatGPT conversation audio.
     /// </summary>
     public static async Task PlayAsync(
         AudioSender sender,
         string deviceId,
         IPEndPoint endpoint,
+        AudioFormat format,
         Stream stream,
         PlaybackConfiguration? configuration,
         CancellationToken cancellationToken
@@ -27,9 +30,10 @@ internal static class AudioStreaming
 
         var stopwatch = Stopwatch.StartNew();
         var sent = TimeSpan.Zero;
-        var buffer = new byte[
-            (int)(Constants.AudioFormat.BytesPerSecond * Constants.AudioChunkSize.TotalSeconds)
-        ];
+        // A whole number of frames, so no sample straddles two chunks: 20 ms is 220.5 frames at
+        // 11025 Hz.
+        var frames = format.SampleRate * (int)Constants.AudioChunkSize.TotalMilliseconds / 1000;
+        var buffer = new byte[frames * format.ChannelCount * (format.BitRate / 8)];
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -54,7 +58,7 @@ internal static class AudioStreaming
 
             sender.Send(deviceId, endpoint, buffer.AsSpan(0, read));
 
-            sent += TimeSpan.FromSeconds((double)read / Constants.AudioFormat.BytesPerSecond);
+            sent += TimeSpan.FromSeconds((double)read / format.BytesPerSecond);
 
             if (configuration?.Duration != null && sent > configuration.Duration.Value)
                 return;

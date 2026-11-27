@@ -1,59 +1,85 @@
-using System.Collections.Frozen;
+using System.Collections.Concurrent;
 using System.Globalization;
+using IntercomServer.Utils.Audio;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 
 namespace IntercomServer;
 
 /// <summary>
-/// The built-in sounds, decoded by FFmpeg once, when the server starts, into the format the
-/// server sends. A server whose FFmpeg cannot decode them stops at its start: nothing else in a
-/// start runs FFmpeg, so it would otherwise read as healthy until the first doorbell.
+/// The built-in sounds, decoded by FFmpeg into each format a device is sent them in, once per
+/// format. At the server's start it decodes them in <see cref="Constants.AudioFormat"/>, the
+/// format every intercom plays, and a server whose FFmpeg cannot decode them stops there: nothing
+/// else in a start runs FFmpeg, so it would otherwise read as healthy until the first doorbell.
 /// </summary>
 internal class SoundLibrary(AudioDecoder decoder) : IHostedService
 {
     private static readonly ILogger Logger = Log.ForContext<SoundLibrary>();
 
-    private FrozenDictionary<string, byte[]>? _sounds;
+    private readonly ConcurrentDictionary<(string FileName, AudioFormat Format), Task<byte[]>> _sounds =
+        new();
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var sounds = new Dictionary<string, byte[]>();
+        var lengths = new List<string>();
 
         foreach (var fileName in Constants.AudioFiles.All)
         {
-            await using var stream = GetType()
-                .Assembly.GetManifestResourceStream($"{GetType().Namespace}.AudioFiles.{fileName}")!;
+            var pcm = await DecodeAsync(fileName, Constants.AudioFormat, cancellationToken);
+            _sounds[(fileName, Constants.AudioFormat)] = Task.FromResult(pcm);
 
-            sounds[fileName] = await decoder.DecodeAsync(
-                fileName,
-                stream,
-                Constants.AudioFormat,
-                cancellationToken
+            lengths.Add(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{fileName} {(double)pcm.Length / Constants.AudioFormat.BytesPerSecond:0.00} s"
+                )
             );
         }
 
-        _sounds = sounds.ToFrozenDictionary();
-
         Logger.Information(
             "Decoded the built-in sounds with FFmpeg: {Sounds}",
-            string.Join(
-                ", ",
-                sounds.Select(sound =>
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"{sound.Key} {(double)sound.Value.Length / Constants.AudioFormat.BytesPerSecond:0.00} s"
-                    )
-                )
-            )
+            string.Join(", ", lengths)
         );
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
-    /// A stream of its own over the PCM of the built-in sound <paramref name="fileName"/>, in
-    /// <see cref="Constants.AudioFormat"/>.
+    /// A stream of its own over the PCM of the built-in sound <paramref name="fileName"/> in
+    /// <paramref name="format"/>, which FFmpeg decodes the first time it is asked for.
     /// </summary>
-    public Stream Open(string fileName) => new MemoryStream(_sounds![fileName], writable: false);
+    public async Task<Stream> OpenAsync(
+        string fileName,
+        AudioFormat format,
+        CancellationToken cancellationToken
+    )
+    {
+        var key = (fileName, format);
+        // One decode serves every playback that asks for it, so a playback that is cancelled
+        // stops waiting for it and leaves it running.
+        var decoding = _sounds.GetOrAdd(key, _ => DecodeAsync(fileName, format, CancellationToken.None));
+
+        try
+        {
+            return new MemoryStream(await decoding.WaitAsync(cancellationToken), writable: false);
+        }
+        catch when (decoding.IsFaulted)
+        {
+            // The next playback decodes it again, rather than failing on this decode's error.
+            _sounds.TryRemove(KeyValuePair.Create(key, decoding));
+            throw;
+        }
+    }
+
+    private async Task<byte[]> DecodeAsync(
+        string fileName,
+        AudioFormat format,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var stream = GetType()
+            .Assembly.GetManifestResourceStream($"{GetType().Namespace}.AudioFiles.{fileName}")!;
+
+        return await decoder.DecodeAsync(fileName, stream, format, cancellationToken);
+    }
 }

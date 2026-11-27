@@ -1,13 +1,15 @@
 using IntercomServer.Tests.Harness;
+using IntercomServer.Utils.Audio;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace IntercomServer.Tests;
 
 /// <summary>
 /// What a device's UDP listener receives: 640-byte payloads, one 20 ms chunk at mono 16 kHz
-/// 16-bit each, every one behind a 4-byte big-endian packet index. Each device has a counter of
-/// its own, which numbers every packet the server sends it, from every stream, and runs on from
-/// one sound to the next. What a device advertises in <c>audio_formats</c> changes none of it.
+/// 16-bit each, every one behind a 4-byte big-endian packet index. A device that advertises
+/// another rate in <c>audio_formats.out</c> is sent its sounds at that rate, in 20 ms chunks of
+/// it, each split past 1468 bytes. Each device has a counter of its own, which numbers every
+/// packet the server sends it, from every stream, and runs on from one sound to the next.
 /// </summary>
 public sealed class PacketTests
 {
@@ -144,34 +146,71 @@ public sealed class PacketTests
     }
 
     [Fact]
-    public async Task What_a_device_advertises_changes_nothing_it_is_sent()
+    public async Task Each_device_is_sent_its_sounds_at_the_rate_it_advertises_in_20_ms_chunks_of_it()
     {
+        // A rate and its 20 ms chunk in bytes, mono 16-bit, from the lowest rate the server
+        // produces to the highest: at 11025 Hz, 20 ms is 220.5 samples, and a chunk carries
+        // whole ones.
+        (int SampleRate, int ChunkBytes)[] formats =
+        [
+            (16000, 640),
+            (8000, 320),
+            (11025, 440),
+            (48000, 1920),
+            (192000, 7680),
+        ];
+
         await using var harness = await ServerHarness.StartAsync();
-        var standard = await harness.AddDeviceAsync("0x0a0001");
-        await standard.ComeOnlineAsync();
-
-        var unadvertised = await harness.AddDeviceAsync("0x0a0002");
-        var configuration = unadvertised.DefaultConfiguration();
-        configuration.Remove("audio_formats");
-        await unadvertised.PublishConfigurationAsync(configuration);
-        await unadvertised.PublishStateAsync();
-
-        var otherRate = await harness.AddDeviceAsync("0x0a0003");
-        configuration = otherRate.DefaultConfiguration();
-        configuration["audio_formats"]!["out"]!["sample_rate"] = 48000;
-        await otherRate.PublishConfigurationAsync(configuration);
-        await otherRate.PublishStateAsync();
+        var devices = new List<TestDevice>();
+        foreach (var (sampleRate, _) in formats)
+        {
+            var device = await harness.AddDeviceAsync($"0x0a{sampleRate:x4}");
+            var configuration = device.DefaultConfiguration();
+            configuration["audio_formats"]!["out"]!["sample_rate"] = sampleRate;
+            await device.PublishConfigurationAsync(configuration);
+            await device.PublishStateAsync();
+            devices.Add(device);
+        }
 
         await harness.RingDoorbellAsync();
 
-        var expected = await Payloads(standard);
-        // Two hex digits a byte: each payload is 640 bytes.
-        Assert.All(expected, payload => Assert.Equal(640 * 2, payload.Length));
-        Assert.Equal(expected, await Payloads(unadvertised));
-        Assert.Equal(expected, await Payloads(otherRate));
+        foreach (var (device, (sampleRate, chunkBytes)) in devices.Zip(formats))
+        {
+            var packets = new List<AudioPacket> { await device.NextPacketAsync() };
+            while (await device.NextPacketWithinAsync(SoundEnded) is { } packet)
+                packets.Add(packet);
+            var sent = packets.SelectMany(p => p.Payload.ToArray()).ToArray();
+            var format = new AudioFormat(AudioChannelLayout.Mono, sampleRate, 16);
+
+            // The doorbell's length at the device's rate, and the server's decode of it in the
+            // device's format, byte for byte.
+            Assert.InRange(
+                TimeSpan.FromSeconds((double)sent.Length / format.BytesPerSecond),
+                BuiltInSounds.DoorbellLength - BuiltInSounds.Margin,
+                BuiltInSounds.DoorbellLength + BuiltInSounds.Margin
+            );
+            var decoded = await BuiltInSounds.DecodedAsync(harness, Constants.AudioFiles.Doorbell, format);
+            Assert.True(
+                sent.AsSpan().SequenceEqual(decoded),
+                $"The device at {sampleRate} Hz was sent {sent.Length} bytes, not the {decoded.Length} of the doorbell decoded at its rate."
+            );
+            Assert.Equal(PayloadSizes(sent.Length, chunkBytes), packets.Select(p => p.Payload.Length));
+            Assert.Equal(Enumerable.Range(0, packets.Count), packets.Select(p => p.Index));
+        }
     }
 
-    // Half a second of what the device got, each payload as hex.
-    private static async Task<List<string>> Payloads(TestDevice device) =>
-        (await device.NextPacketsAsync(25)).Select(p => Convert.ToHexString(p.Payload)).ToList();
+    // The payloads of `bytes` sent in chunks of `chunkBytes`, each chunk split into datagrams of
+    // at most 1468 bytes, 1472 less the index.
+    private static List<int> PayloadSizes(int bytes, int chunkBytes)
+    {
+        const int maxPayload = 1468;
+        var sizes = new List<int>();
+        for (var chunkStart = 0; chunkStart < bytes; chunkStart += chunkBytes)
+        {
+            var chunk = Math.Min(chunkBytes, bytes - chunkStart);
+            for (var offset = 0; offset < chunk; offset += maxPayload)
+                sizes.Add(Math.Min(maxPayload, chunk - offset));
+        }
+        return sizes;
+    }
 }

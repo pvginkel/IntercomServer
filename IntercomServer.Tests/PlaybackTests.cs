@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json.Nodes;
 using IntercomServer.Tests.Harness;
 
 namespace IntercomServer.Tests;
@@ -7,7 +8,8 @@ namespace IntercomServer.Tests;
 /// How a sound plays: a looped one, the ring a call request plays to the devices it rings,
 /// goes on until it is cancelled. Each device has a playback of its own, so a new sound
 /// replaces what the devices it reaches were playing, and nothing else. A device the server
-/// cannot send to is skipped, and the others play.
+/// cannot send to, or that advertises no format the server can produce, is skipped, and the
+/// others play. The server produces mono 16-bit PCM from 8 to 192 kHz.
 /// </summary>
 public sealed class PlaybackTests
 {
@@ -132,10 +134,65 @@ public sealed class PlaybackTests
         await AssertSkippedWhileTheOthersPlay(harness, configured, unparsable);
     }
 
+    [Fact]
+    public async Task A_device_that_advertises_no_out_format_the_server_can_produce_is_sent_nothing_and_the_others_play()
+    {
+        (string Advertises, Action<JsonObject> Edit)[] unproducible =
+        [
+            ("no audio_formats", configuration => configuration.Remove("audio_formats")),
+            ("no out", configuration => configuration["audio_formats"]!.AsObject().Remove("out")),
+            ("stereo", configuration => Out(configuration)["channel_layout"] = "stereo"),
+            ("24-bit", configuration => Out(configuration)["bit_rate"] = 24),
+            ("8-bit", configuration => Out(configuration)["bit_rate"] = 8),
+            ("7999 Hz", configuration => Out(configuration)["sample_rate"] = 7999),
+            ("192001 Hz", configuration => Out(configuration)["sample_rate"] = 192001),
+            ("no channel layout", configuration => Out(configuration).Remove("channel_layout")),
+            ("no sample rate", configuration => Out(configuration).Remove("sample_rate")),
+            ("no bit rate", configuration => Out(configuration).Remove("bit_rate")),
+        ];
+
+        await using var harness = await ServerHarness.StartAsync();
+        var skipped = new List<TestDevice>();
+        for (var i = 0; i < unproducible.Length; i++)
+        {
+            var device = await harness.AddDeviceAsync($"0x0a01{i:x2}");
+            var configuration = device.DefaultConfiguration();
+            unproducible[i].Edit(configuration);
+            await device.PublishConfigurationAsync(configuration);
+            await device.PublishStateAsync();
+            skipped.Add(device);
+        }
+        // Published last, the server meets it after every device it skips.
+        var configured = await harness.AddDeviceAsync("0x0a0001");
+        await configured.ComeOnlineAsync();
+
+        await harness.RingDoorbellAsync();
+
+        // The whole doorbell reached the configured device, and nothing reached the others. Once
+        // each advertises the default configuration, the next doorbell reaches it, its first
+        // packet the first its counter numbered.
+        await configured.NextSoundAsync(BuiltInSounds.DoorbellLength + BuiltInSounds.Margin);
+        foreach (var (device, (advertises, _)) in skipped.Zip(unproducible))
+            Assert.True(
+                device.TakeArrivedPackets().Count == 0,
+                $"A device that advertises {advertises} was sent audio."
+            );
+
+        foreach (var device in skipped)
+            await device.PublishConfigurationAsync();
+        await harness.RingDoorbellAsync();
+
+        foreach (var device in skipped)
+            Assert.Equal(0, (await device.NextPacketAsync()).Index);
+    }
+
+    private static JsonObject Out(JsonObject configuration) =>
+        configuration["audio_formats"]!["out"]!.AsObject();
+
     // The skipped device published first, so the server knew of it before the other, which
     // the doorbell still plays on from its first packet. Once the skipped device advertises
-    // its endpoint, the next doorbell reaches it, its first packet the first its counter
-    // numbered: nothing was sent to it before.
+    // the default configuration, the next doorbell reaches it, its first packet the first its
+    // counter numbered: nothing was sent to it before.
     private static async Task AssertSkippedWhileTheOthersPlay(
         ServerHarness harness,
         TestDevice configured,

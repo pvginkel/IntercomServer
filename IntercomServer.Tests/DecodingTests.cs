@@ -7,7 +7,8 @@ namespace IntercomServer.Tests;
 
 /// <summary>
 /// FFmpeg decodes the built-in sounds once, when the server starts, into mono 16 kHz 16-bit,
-/// and a device is sent exactly what it decoded. A server that cannot decode does not start.
+/// and once more into each other format a device is sent them in, and a device is sent exactly
+/// what it decoded. A server that cannot decode does not start.
 /// These run the FFmpeg on the PATH, whose version is not the one production runs, so they read
 /// a built-in sound's length and level, never bytes one FFmpeg makes and another may not.
 /// </summary>
@@ -23,7 +24,7 @@ public sealed class DecodingTests
     {
         await using var harness = await ServerHarness.StartAsync();
 
-        var pcm = Decoded(harness, fileName);
+        var pcm = await BuiltInSounds.DecodedAsync(harness, fileName, Constants.AudioFormat);
 
         // Decoded at another rate, channel count or sample width, the sound would be twice its
         // length or more, or half of it.
@@ -45,11 +46,19 @@ public sealed class DecodingTests
         Assert.True(peak > short.MaxValue / 10, $"{fileName} decoded to near silence: its peak is {peak}.");
     }
 
-    [Fact]
-    public async Task The_server_decodes_into_signed_16_bit_little_endian_samples()
+    // The rates a device may advertise run from 8 to 192 kHz.
+    [Theory]
+    [InlineData(8000)]
+    [InlineData(11025)]
+    [InlineData(16000)]
+    [InlineData(48000)]
+    [InlineData(192000)]
+    public async Task The_server_decodes_into_signed_16_bit_little_endian_samples_at_the_rate_it_is_asked_for(
+        int sampleRate
+    )
     {
         await using var harness = await ServerHarness.StartAsync();
-        var format = Constants.AudioFormat;
+        var format = new AudioFormat(AudioChannelLayout.Mono, sampleRate, 16);
         short[] samples =
         [
             .. Enumerable
@@ -66,7 +75,8 @@ public sealed class DecodingTests
         ];
 
         // A WAV already in the format decoded into passes through every FFmpeg unchanged, so the
-        // decode is the samples themselves in the encoding the server sends.
+        // decode is the samples themselves in the encoding the server sends. Decoded at another
+        // rate, they would be resampled.
         var pcm = await harness
             .Services.GetRequiredService<AudioDecoder>()
             .DecodeAsync(
@@ -93,7 +103,11 @@ public sealed class DecodingTests
 
         var packets = await device.NextSoundAsync(BuiltInSounds.DoorbellLength + BuiltInSounds.Margin);
         var sent = packets.OrderBy(packet => packet.Index).SelectMany(packet => packet.Payload.ToArray()).ToArray();
-        var decoded = Decoded(harness, Constants.AudioFiles.Doorbell);
+        var decoded = await BuiltInSounds.DecodedAsync(
+            harness,
+            Constants.AudioFiles.Doorbell,
+            Constants.AudioFormat
+        );
         Assert.True(
             sent.AsSpan().SequenceEqual(decoded),
             $"The device was sent {sent.Length} bytes in {packets.Count} packets, which are not the {decoded.Length} bytes decoded."
@@ -154,13 +168,5 @@ public sealed class DecodingTests
             writer.Write(sample);
         writer.Flush();
         return wav.ToArray();
-    }
-
-    private static byte[] Decoded(ServerHarness harness, string fileName)
-    {
-        using var stream = harness.Services.GetRequiredService<SoundLibrary>().Open(fileName);
-        var pcm = new MemoryStream();
-        stream.CopyTo(pcm);
-        return pcm.ToArray();
     }
 }

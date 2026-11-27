@@ -37,6 +37,40 @@ public sealed class PacingTests
     }
 
     [Fact]
+    public async Task A_device_at_another_rate_is_paced_to_real_time_beside_a_16_kHz_device()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var standard = await harness.AddDeviceAsync("0x0a0001");
+        var otherRate = await harness.AddDeviceAsync("0x0a0002");
+        await standard.ComeOnlineAsync();
+        var configuration = otherRate.DefaultConfiguration();
+        configuration["audio_formats"]!["out"]!["sample_rate"] = 48000;
+        await otherRate.PublishConfigurationAsync(configuration);
+        await otherRate.PublishStateAsync();
+
+        await harness.RingDoorbellAsync();
+
+        // A second of the doorbell to each, well within its length: 50 chunks of 20 ms, a
+        // datagram each at 16 kHz, and two at 48 kHz, where a chunk is 1920 bytes.
+        var toStandard = await standard.NextPacketsAsync(50);
+        var toOtherRate = await otherRate.NextPacketsAsync(100);
+
+        // Each device's last chunk goes out 49 chunks' time after its first. Paced by 16 kHz's
+        // clock, the device at 48 kHz would take three times that.
+        var audio = 49 * LivePlayback.ChunkLength;
+        Assert.InRange(
+            toStandard[^1].ArrivedAfter(toStandard[0]),
+            audio * 0.9,
+            audio + TimeSpan.FromMilliseconds(250)
+        );
+        Assert.InRange(
+            toOtherRate[^1].ArrivedAfter(toOtherRate[0]),
+            audio * 0.9,
+            audio + TimeSpan.FromMilliseconds(250)
+        );
+    }
+
+    [Fact]
     public async Task A_chunk_that_comes_late_is_made_up()
     {
         const int rounds = 20;

@@ -1,3 +1,6 @@
+using IntercomServer.Utils.Audio;
+using Microsoft.Extensions.DependencyInjection;
+
 namespace IntercomServer.Tests.Harness;
 
 /// <summary>
@@ -20,4 +23,18 @@ internal static class BuiltInSounds
     public const int BytesPerSecond = 32000;
 
     public static int Bytes(TimeSpan length) => (int)(length.TotalSeconds * BytesPerSecond);
+
+    /// <summary>
+    /// The PCM the server plays of the built-in sound <paramref name="fileName"/> in
+    /// <paramref name="format"/>, as its <see cref="SoundLibrary"/> decoded it.
+    /// </summary>
+    public static async Task<byte[]> DecodedAsync(ServerHarness harness, string fileName, AudioFormat format)
+    {
+        await using var stream = await harness
+            .Services.GetRequiredService<SoundLibrary>()
+            .OpenAsync(fileName, format, TestContext.Current.CancellationToken);
+        var pcm = new MemoryStream();
+        await stream.CopyToAsync(pcm, TestContext.Current.CancellationToken);
+        return pcm.ToArray();
+    }
 }

@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Net;
 using IntercomServer.ChatGpt.Audio;
 using IntercomServer.Utils;
+using IntercomServer.Utils.Audio;
 using NAudio.Wave;
 using OpenAI.Realtime;
 using Serilog;
@@ -17,10 +18,10 @@ namespace IntercomServer.ChatGpt;
 /// the device and the OpenAI Realtime API; it does not control the device (LEDs,
 /// recording, endpoints) — that is <see cref="StateManager"/>'s responsibility.
 ///
-/// The device's microphone arrives over UDP on the shared <see cref="UdpAudioServer"/>;
-/// this conversation filters by the device's source endpoint, resamples 16 kHz -> 24 kHz
-/// and forwards it to OpenAI. The model's audio is resampled 24 kHz -> 16 kHz and sent
-/// back to the device over UDP via <see cref="AudioSender"/>.
+/// The device's microphone arrives over UDP on the shared <see cref="UdpAudioServer"/>, in the
+/// device's input format; this conversation filters by the device's source endpoint, resamples
+/// it to 24 kHz and forwards it to OpenAI. The model's audio is resampled from 24 kHz to the
+/// device's output format and sent back to the device over UDP via <see cref="AudioSender"/>.
 /// </summary>
 internal sealed class Conversation
 {
@@ -44,12 +45,11 @@ internal sealed class Conversation
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
     private readonly IPEndPoint _deviceEndpoint;
-    private readonly StreamingResampler _micResampler =
-        new(Constants.AudioFormat.SampleRate, OpenAiSampleRate);
-    private readonly StreamingResampler _outResampler =
-        new(OpenAiSampleRate, Constants.AudioFormat.SampleRate);
-    private readonly LiveAudioStream _audioOut =
-        new((int)(Constants.AudioFormat.BytesPerSecond * PrerollSeconds));
+    private readonly AudioFormat _inputFormat;
+    private readonly AudioFormat _outputFormat;
+    private readonly StreamingResampler _micResampler;
+    private readonly StreamingResampler _outResampler;
+    private readonly LiveAudioStream _audioOut;
 
     private readonly object _writerLock = new();
     private WaveFileWriter? _receivedWriter;
@@ -111,8 +111,12 @@ internal sealed class Conversation
 
     public Device Device { get; }
 
+    /// <param name="inputFormat">The device's microphone format, mono 16-bit.</param>
+    /// <param name="outputFormat">The format the device is sent, mono 16-bit.</param>
     public Conversation(
         Device device,
+        AudioFormat inputFormat,
+        AudioFormat outputFormat,
         ChatGptConfiguration configuration,
         McpToolRegistry mcp,
         WebSearchTool webSearch,
@@ -130,6 +134,11 @@ internal sealed class Conversation
         _audioServer = audioServer;
         _onClosing = onClosing;
         _deviceEndpoint = IPEndPoint.Parse(device.Configuration!.Endpoint!);
+        _inputFormat = inputFormat;
+        _outputFormat = outputFormat;
+        _micResampler = new StreamingResampler(inputFormat.SampleRate, OpenAiSampleRate);
+        _outResampler = new StreamingResampler(OpenAiSampleRate, outputFormat.SampleRate);
+        _audioOut = new LiveAudioStream((int)(outputFormat.BytesPerSecond * PrerollSeconds));
 
         // Take the MCP lease last, once nothing above can throw: it keeps the shared MCP
         // connections open for this conversation's whole lifetime (through close-out) and is
@@ -359,18 +368,12 @@ internal sealed class Conversation
                 new WaveFormat(OpenAiSampleRate, 16, 1)
             );
             _sentWriter = new WaveFileWriter(
-                Path.Combine(
-                    directory,
-                    $"{stamp}_{deviceId}_sent_{Constants.AudioFormat.SampleRate}.wav"
-                ),
-                new WaveFormat(Constants.AudioFormat.SampleRate, 16, 1)
+                Path.Combine(directory, $"{stamp}_{deviceId}_sent_{_outputFormat.SampleRate}.wav"),
+                new WaveFormat(_outputFormat.SampleRate, 16, 1)
             );
             _micWriter = new WaveFileWriter(
-                Path.Combine(
-                    directory,
-                    $"{stamp}_{deviceId}_mic_{Constants.AudioFormat.SampleRate}.wav"
-                ),
-                new WaveFormat(Constants.AudioFormat.SampleRate, 16, 1)
+                Path.Combine(directory, $"{stamp}_{deviceId}_mic_{_inputFormat.SampleRate}.wav"),
+                new WaveFormat(_inputFormat.SampleRate, 16, 1)
             );
             // Exactly what we hand to the model as input audio (post-gate, post-resample), so we
             // can hear what OpenAI actually received and tell good gating from a corrupt stream.
@@ -404,19 +407,19 @@ internal sealed class Conversation
                 {
                     case RealtimeServerUpdateResponseOutputAudioDelta audio:
                         var received = audio.Delta.ToArray();
-                        var pcm16 = _outResampler.Resample(received);
+                        var resampled = _outResampler.Resample(received);
 
                         // Debug capture: the raw audio received from OpenAI and the
                         // resampled audio we send to the device.
                         lock (_writerLock)
                         {
                             _receivedWriter?.Write(received, 0, received.Length);
-                            if (pcm16.Length > 0)
-                                _sentWriter?.Write(pcm16, 0, pcm16.Length);
+                            if (resampled.Length > 0)
+                                _sentWriter?.Write(resampled, 0, resampled.Length);
                         }
 
-                        if (pcm16.Length > 0)
-                            _audioOut.Append(pcm16);
+                        if (resampled.Length > 0)
+                            _audioOut.Append(resampled);
                         break;
 
                     case RealtimeServerUpdateResponseOutputAudioDone:
@@ -709,7 +712,7 @@ internal sealed class Conversation
         if (sampleCount == 0)
             return _gateOpen ? pcm24 : null;
 
-        var sampleRate = Constants.AudioFormat.SampleRate;
+        var sampleRate = _inputFormat.SampleRate;
         var attackSamples = (long)_configuration.MicGateAttackMs * sampleRate / 1000;
         var backstopSamples = (long)_configuration.MicGateHoldMs * sampleRate / 1000;
 
@@ -827,6 +830,7 @@ internal sealed class Conversation
                 _audioSender,
                 Device.DeviceId,
                 _deviceEndpoint,
+                _outputFormat,
                 _audioOut,
                 configuration: null,
                 _cts.Token
