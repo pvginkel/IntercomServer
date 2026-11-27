@@ -118,13 +118,17 @@ The plan lands `main` only when all of these hold:
 - it planned `$SHA` as stage `prd`: `presync: cloning https://github.com/pvginkel/IntercomDeploy.git
   at <SHA>` and `presync: terraform runs as stage=prd, namespace=intercom-prd`;
 - it finished: exit code `0`, and last `presync: plan only: nothing was applied and no volume was
-  reattached`;
+  reattached`. Read from Elasticsearch, which keeps no exit code, that last line stands for it: the
+  hook prints it as its final step, once the plan has succeeded;
 - `presync: the plan carries N change(s):` lists the changes the slice's acceptance criteria name,
   each `presync:   <address>: <action>` with the action they name, and nothing else.
 
 A change they do not name, one with another action (a `replace` where they name an `update`), or
-a plan that failed stops the push: stop with `blocked`, quoting the change list as read. Otherwise
-`main` fast-forwards to the SHA the plan read, the roll is followed, and the topic branch goes:
+a plan that failed stops the push: stop with `blocked`, quoting the change list as read. No plan of
+`$SHA` stops it too, a Job that was never run or one that cloned another SHA (the Ansible sheet's
+`REV` defaults to the head of `main`): stop with `blocked`, naming the plan Job's action as the
+bullet that pushes the branch words it, with `$SHA` in full. Otherwise `main` fast-forwards to the
+SHA the plan read, the roll is followed, and the topic branch goes:
 
 ```bash
 git push origin "$SHA:refs/heads/main"
