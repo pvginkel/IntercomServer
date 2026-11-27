@@ -28,6 +28,13 @@ not own:
   `ChatGptConfiguration.Validate` refuses a missing close-out prompt at startup. A setting whose
   default is in code, such as `HTTP_PORT` or `DEVICES_TOPIC_PREFIXES`, changes the chart only
   when production needs another value.
+  IntercomDeploy's PreSync hook applies its Terraform, the Keycloak clients among it, from whatever
+  reaches its `main`, so every commit there, a README's included, reaches `main` only at a SHA a
+  plan Job of stage `prd` has read on a topic branch. A slice's change there, its README included,
+  is in the code phases' commits, which the test phase pushes through the plan Job
+  ([`slice-test-plan.md`](slice-test-plan.md), step 2), and nothing is committed there after that
+  push. Jenkins' image pins, and the revert of one, change nothing the hook applies and reach
+  `main` with no plan Job.
 
 Inside this repo, **fix the callers**: no shim, adapter or second code path that keeps an old shape
 alive. A change to MQTT or UDP that the firmware must follow is a breaking change to a consumer

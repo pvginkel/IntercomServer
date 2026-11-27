@@ -63,18 +63,79 @@ Pushing is this phase's job, honouring any repo named in `plan.md`'s `## Push ho
 IntercomDeploy's `main`.
 
 **When the slice changed IntercomDeploy, it goes first**, so that the chart already sets what the
-new image needs (a new environment variable, prompt file or secret) when the image rolls. Its push
-rolls `intercom-prd` on its own, with the old image:
+new image needs (a new environment variable, prompt file or secret) when the image rolls. Its
+landing rolls `intercom-prd` on its own, with the old image. The exception is a change that removes
+what the old image still reads: then this repo goes first.
+
+**IntercomDeploy reaches `main` only at a SHA a plan Job has read.** Its PreSync hook applies its
+Terraform, the Keycloak clients among it, from whatever reaches `main`, so every commit there goes
+to a topic branch first, and `main` takes it once a plan Job of stage `prd` has read it at its SHA
+(Ansible's runbook `docs/runbooks/oidc-client.md`, "Add an OIDC client to an app"). Starting that
+Job is a write this environment cannot make: Pilot runs it through an Ansible work item. So the
+push takes two passes of this phase. The first stops on the plan Job, and the retry, which runs
+this doc from the top again, reads the plan and lands `main`. Which pass this is, `origin` says:
 
 ```bash
 cd /work/IntercomDeploy
-git fetch origin && git rebase origin/main && git push origin HEAD:main
-timeout 3300 ~/.local/bin/track_build.py --deploy IntercomDeploy main "$(git rev-parse HEAD)" --roll-timeout 1800
+git fetch origin && git rebase origin/main
+BRANCH=slice-<NNN>; SHA=$(git rev-parse HEAD)    # <NNN>: the slice's number
+git rev-parse origin/main; git rev-parse -q --verify "origin/$BRANCH"
 ```
 
-The exception is a change that removes what the old image still reads: then this repo goes first.
+- **`$SHA` is `origin/main`**: IntercomDeploy has nothing of the slice left to push. Go on to this
+  repo.
+- **The branch is missing, or its head is not `$SHA`**: the plan to read is still to come. Push the
+  branch, `git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"`, and stop with `blocked`,
+  naming the action for Pilot's Ansible work item with `$SHA` in full: "Run the plan Job of Ansible
+  `docs/runbooks/argocd.md` § Planning a stage's Terraform as its hook applies it, for
+  IntercomDeploy's stage `prd`, `APP_PATH` empty and `NS=intercom-prd`, at `<SHA>`, the head of its
+  branch `slice-<NNN>`. Leave the Job standing: skip the sheet's last `delete job`." A moved
+  `origin/main` brings the run back here, since the rebase gives a new SHA.
+- **The branch's head is `$SHA`**: read the plan. The read-only kubeconfig in `iac` reads
+  `argocd-hooks`' Jobs and their logs:
 
-Then this repo. **This is the production deploy.**
+```bash
+J=(cexec iac kubectl --context prd -n argocd-hooks)
+"${J[@]}" get pods -l job-name=tf-plan-intercom-prd -o jsonpath='{.items[0].status.containerStatuses[0].state.terminated.exitCode}{"\n"}'
+"${J[@]}" logs job/tf-plan-intercom-prd | grep '^presync: '
+```
+
+A Job that is gone left its log in Elasticsearch, each attempt a pod of its own name; read the
+newest:
+
+```bash
+curl -s -u "$ELASTIC_USER:$ELASTIC_PASSWORD" "$ELASTIC_URL/filebeat-*/_search" -H 'Content-Type: application/json' -d '{"size":5000,"sort":[{"@timestamp":"asc"}],"_source":["kubernetes.pod.name","message"],"query":{"bool":{"filter":[{"term":{"kubernetes.namespace":"argocd-hooks"}},{"wildcard":{"kubernetes.pod.name":"tf-plan-intercom-prd-*"}}]}}}' | python3 -I -c '
+import json,sys
+for h in json.load(sys.stdin)["hits"]["hits"]:
+    s=h["_source"]; m=s.get("message","")
+    if m.startswith("presync: "): print(s["kubernetes"]["pod"]["name"], m)'
+```
+
+The plan lands `main` only when all of these hold:
+
+- it planned `$SHA` as stage `prd`: `presync: cloning https://github.com/pvginkel/IntercomDeploy.git
+  at <SHA>` and `presync: terraform runs as stage=prd, namespace=intercom-prd`;
+- it finished: exit code `0`, and last `presync: plan only: nothing was applied and no volume was
+  reattached`;
+- `presync: the plan carries N change(s):` lists the changes the slice's acceptance criteria name,
+  each `presync:   <address>: <action>` with the action they name, and nothing else.
+
+A change they do not name, one with another action (a `replace` where they name an `update`), or
+a plan that failed stops the push: stop with `blocked`, quoting the change list as read. Otherwise
+`main` fast-forwards to the SHA the plan read, the roll is followed, and the topic branch goes:
+
+```bash
+git push origin "$SHA:refs/heads/main"
+timeout 3300 ~/.local/bin/track_build.py --deploy IntercomDeploy main "$SHA" --roll-timeout 1800
+"${J[@]}" logs job/tf-presync-intercom-prd | grep 'Apply complete!'
+git push origin --delete "$BRANCH"
+```
+
+A push refused as no fast-forward means `origin/main` moved after the rebase: run this step again
+from the top, which asks for the plan again. The hook's apply reads `Apply complete! Resources: <n>
+added, <m> changed, 0 destroyed.`, `<n>` and `<m>` the plan's creates and updates.
+
+Then this repo, once IntercomDeploy's `main` has rolled. **This is the production deploy.**
 
 ```bash
 cd /work/IntercomServer
@@ -162,7 +223,8 @@ screen) goes in the close-out as the operator's check, with what to listen for.
 A red build leaves production on the previous image: a finding, nothing more. A roll that leaves the
 server down, a crash loop or a start that never reaches MQTT, means the doorbell is dead. **Roll back
 first, then report:** revert the slice's own pin commit in IntercomDeploy, the one `track_build.py`
-named, and push it.
+named, and push it to `main` at once. A pin commit, and so its revert, changes nothing the hook
+applies: it reaches `main` with no plan Job, as Jenkins' own pin commits do.
 
 ```bash
 cd /work/IntercomDeploy && git fetch origin && git rebase origin/main
@@ -171,6 +233,10 @@ timeout 3300 ~/.local/bin/track_build.py --deploy IntercomDeploy main "$(git rev
 ```
 
 Then repeat step 3 against the pod the revert rolled, and report the cause as a blocking finding.
+
+A roll of IntercomDeploy's own commits, before this repo's push, that leaves the server down has no
+pin commit to revert. Its revert would be a commit like any other, through the plan Job: stop with
+`blocked` at once, with the roll's diagnosis.
 
 ## 5. Check off `verification.json`
 

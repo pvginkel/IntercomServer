@@ -25,10 +25,13 @@ whole diff, in one pass.
    update it in its code phases updates it now, keeping the existing ids stable.
 3. **`.kubecoder/project.yaml`'s comments** say why each verb is what it is. A slice that changed a
    verb brings its comment along.
-4. **pvginkel/IntercomDeploy's `README.md`**, checked out at `/work/IntercomDeploy`, when the slice
-   changed the deploy's shape: a new secret, volume, port or Keycloak client. The chart's
-   `chart/files/*.md` are the server's prompts, product behaviour rather than docs: never edited
-   here.
+4. **pvginkel/IntercomDeploy's `README.md`**, checked out at `/work/IntercomDeploy`, is read here
+   and never committed. Every commit to IntercomDeploy reaches its `main` only at a SHA a plan Job
+   has read, and only the test phase's push meets that
+   ([`slice-test-plan.md`](slice-test-plan.md), step 2), so the code phase that changes the
+   deploy's shape (a new secret, volume, port or Keycloak client) brings the README along in its
+   own commit. A gap this phase finds there goes in the close-out. The chart's `chart/files/*.md`
+   are the server's prompts, product behaviour rather than docs: never edited here.
 5. **Another repo the slice created or changed** follows its own slice doc plan where it has one,
    else its `README.md`.
 
