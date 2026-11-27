@@ -95,7 +95,10 @@ public sealed class PlaybackTests
     [Fact]
     public async Task A_device_without_a_configuration_is_skipped_and_the_others_play()
     {
-        await using var harness = await ServerHarness.StartAsync();
+        // Named, the doorbell is meant for it, though it has no microphone.
+        await using var harness = await ServerHarness.StartAsync(
+            new Dictionary<string, string?> { ["DOORBELL_EXTRA_DEVICES"] = "0x0a0001" }
+        );
         var unconfigured = await harness.AddDeviceAsync("0x0a0001");
         var configured = await harness.AddDeviceAsync("0x0a0002");
         await unconfigured.PublishStateAsync();
@@ -151,11 +154,15 @@ public sealed class PlaybackTests
             ("no bit rate", configuration => Out(configuration).Remove("bit_rate")),
         ];
 
-        await using var harness = await ServerHarness.StartAsync();
+        // Named, the doorbell is meant for each, whatever microphone it advertises.
+        var skippedIds = Enumerable.Range(0, unproducible.Length).Select(i => $"0x0a01{i:x2}").ToList();
+        await using var harness = await ServerHarness.StartAsync(
+            new Dictionary<string, string?> { ["DOORBELL_EXTRA_DEVICES"] = string.Join(',', skippedIds) }
+        );
         var skipped = new List<TestDevice>();
         for (var i = 0; i < unproducible.Length; i++)
         {
-            var device = await harness.AddDeviceAsync($"0x0a01{i:x2}");
+            var device = await harness.AddDeviceAsync(skippedIds[i]);
             var configuration = device.DefaultConfiguration();
             unproducible[i].Edit(configuration);
             await device.PublishConfigurationAsync(configuration);

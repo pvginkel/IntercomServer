@@ -4,9 +4,11 @@ using static IntercomServer.Tests.Harness.Commands;
 namespace IntercomServer.Tests;
 
 /// <summary>
-/// Nothing reads whether a device has a microphone. An online, enabled device whose
-/// configuration advertises an <c>out</c> format and no <c>in</c> is rung by a call request and
-/// reached by the doorbell, and its click and long click act as any other device's do.
+/// A device whose configuration advertises no <c>in</c> format has no microphone, nor does one
+/// with no configuration. It is never offered a call: a call request does not ring it. Its
+/// click and long click do nothing: they place, join, accept and reject no call, start no
+/// conversation, and leave a ringing call to its alarm. The doorbell reaches it only when
+/// <c>DOORBELL_EXTRA_DEVICES</c> names it (<c>DoorbellTests</c>).
 /// </summary>
 public sealed class MicrophoneTests
 {
@@ -14,82 +16,72 @@ public sealed class MicrophoneTests
     private const int Packets = 10;
 
     [Fact]
-    public async Task A_device_without_a_microphone_is_rung_accepts_and_ends_the_call_as_any_other()
+    public async Task A_call_request_never_rings_a_device_without_a_microphone()
     {
         await using var harness = await ServerHarness.StartAsync();
-        var intercom = await harness.AddDeviceAsync("0x0a0001");
+        var caller = await harness.AddDeviceAsync("0x0a0001");
         var withoutMicrophone = await AddDeviceWithoutMicrophoneAsync(harness, "0x0a0002");
-        await intercom.ComeOnlineAsync();
+        var unconfigured = await harness.AddDeviceAsync("0x0a0003");
+        await unconfigured.PublishStateAsync();
+        await caller.ComeOnlineAsync();
 
-        await Calls.RequestAsync(intercom, withoutMicrophone);
-        await withoutMicrophone.NextPacketsAsync(Packets);
+        await caller.ClickAsync();
 
-        await withoutMicrophone.ClickAsync();
+        await caller.ExpectCommandsAsync(RedLed(Led.CallNotPossible));
 
-        await intercom.ExpectCommandsAsync(
-            RedLed(Led.Off),
-            GreenLed(Led.On),
-            Recording(true),
-            AddEndpoint(withoutMicrophone.Endpoint)
-        );
-        await withoutMicrophone.ExpectCommandsAsync(
-            RedLed(Led.Off),
-            AddEndpoint(intercom.Endpoint),
-            GreenLed(Led.On),
-            Recording(true)
-        );
+        // With an intercom to ring, the ring plays to it alone.
+        var called = await harness.AddDeviceAsync("0x0a0004");
+        await called.ComeOnlineAsync();
+        await Calls.RequestAsync(caller, called);
+        await called.NextPacketsAsync(Packets);
 
-        await Calls.EndAsync(withoutMicrophone, intercom, withoutMicrophone);
+        Assert.Equal(0, withoutMicrophone.ReceivedPacketCount);
+        await harness.AssertSentNoCommandAsync(withoutMicrophone);
+        await harness.AssertSentNoCommandAsync(unconfigured);
+    }
+
+    // A call's audio goes from device to device, so the server need not take the format.
+    [Fact]
+    public async Task A_device_advertising_an_in_format_the_server_cannot_take_has_a_microphone_and_is_rung()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var caller = await harness.AddDeviceAsync("0x0a0001");
+        var stereo = await harness.AddDeviceAsync("0x0a0002");
+        var configuration = stereo.DefaultConfiguration();
+        configuration["audio_formats"]!["in"]!["channel_layout"] = "stereo";
+        await stereo.PublishConfigurationAsync(configuration);
+        await stereo.PublishStateAsync();
+        await caller.ComeOnlineAsync();
+
+        await Calls.RequestAsync(caller, stereo);
     }
 
     [Fact]
-    public async Task The_doorbell_reaches_a_device_without_a_microphone()
+    public async Task A_device_without_a_microphone_neither_places_a_call_nor_starts_a_conversation()
     {
         await using var harness = await ServerHarness.StartAsync();
         var intercom = await harness.AddDeviceAsync("0x0a0001");
         var withoutMicrophone = await AddDeviceWithoutMicrophoneAsync(harness, "0x0a0002");
+        var unconfigured = await harness.AddDeviceAsync("0x0a0003");
+        await unconfigured.PublishStateAsync();
         await intercom.ComeOnlineAsync();
 
-        await harness.RingDoorbellAsync();
-
-        Assert.True(
-            AudioPacket.SameAudio(
-                await intercom.NextPacketsAsync(Packets),
-                await withoutMicrophone.NextPacketsAsync(Packets)
-            )
-        );
-    }
-
-    [Fact]
-    public async Task A_device_without_a_microphone_calls_cancels_and_starts_a_conversation_as_any_other()
-    {
-        await using var harness = await ServerHarness.StartAsync();
-        var intercom = await harness.AddDeviceAsync("0x0a0001");
-        var withoutMicrophone = await AddDeviceWithoutMicrophoneAsync(harness, "0x0a0002");
-        await intercom.ComeOnlineAsync();
-
-        await Calls.RequestAsync(withoutMicrophone, intercom);
-        await intercom.NextPacketsAsync(Packets);
         await withoutMicrophone.ClickAsync();
-
-        await withoutMicrophone.ExpectCommandsAsync(RedLed(Led.Off));
-        await intercom.ExpectCommandsAsync(RedLed(Led.Off));
-
         await withoutMicrophone.LongClickAsync();
+        await unconfigured.ClickAsync();
+        await unconfigured.LongClickAsync();
 
-        await withoutMicrophone.ExpectCommandsAsync(
-            AddEndpoint(harness.AudioEndpoint),
-            GreenLed(Led.On),
-            Recording(true),
-            RemoveEndpoint(harness.AudioEndpoint),
-            Recording(false),
-            GreenLed(Led.Off)
-        );
-        await Calls.AssertNoCallAsync(intercom, withoutMicrophone);
+        // Had a click placed a call, it would have rung the intercom, and the intercom's click
+        // would accept it.
+        await intercom.ClickAsync();
+
+        await intercom.ExpectCommandsAsync(RedLed(Led.CallNotPossible));
+        await harness.AssertSentNoCommandAsync(withoutMicrophone);
+        await harness.AssertSentNoCommandAsync(unconfigured);
     }
 
     [Fact]
-    public async Task A_device_without_a_microphone_joins_a_call_in_progress_with_a_click_as_any_other()
+    public async Task A_device_without_a_microphone_does_not_join_a_call_in_progress()
     {
         await using var harness = await ServerHarness.StartAsync();
         var caller = await harness.AddDeviceAsync("0x0a0001");
@@ -97,51 +89,36 @@ public sealed class MicrophoneTests
         var withoutMicrophone = await AddDeviceWithoutMicrophoneAsync(harness, "0x0a0003");
         await caller.ComeOnlineAsync();
         await answerer.ComeOnlineAsync();
-        await Calls.StartAsync(caller, answerer, withoutMicrophone);
+        await Calls.StartAsync(caller, answerer);
 
-        await Calls.JoinAsync(withoutMicrophone, caller, answerer);
+        await withoutMicrophone.ClickAsync();
 
-        await Calls.EndAsync(withoutMicrophone, caller, answerer, withoutMicrophone);
-        await Calls.AssertNoCallAsync(caller, answerer, withoutMicrophone);
+        // Had it joined, the next command to each in the call would be its endpoint.
+        await Calls.EndAsync(caller, caller, answerer);
+        await harness.AssertSentNoCommandAsync(withoutMicrophone);
     }
 
     [Fact]
-    public async Task A_device_without_a_microphone_rejects_a_ringing_call_with_a_long_click_as_any_other()
+    public async Task A_device_without_a_microphone_neither_accepts_nor_rejects_a_ringing_call_and_its_alarm_still_ends_it()
     {
         await using var harness = await ServerHarness.StartAsync();
         var caller = await harness.AddDeviceAsync("0x0a0001");
-        var other = await harness.AddDeviceAsync("0x0a0002");
+        var called = await harness.AddDeviceAsync("0x0a0002");
         var withoutMicrophone = await AddDeviceWithoutMicrophoneAsync(harness, "0x0a0003");
         await caller.ComeOnlineAsync();
-        await other.ComeOnlineAsync();
-        await Calls.RequestAsync(caller, other, withoutMicrophone);
-        await other.NextPacketsAsync(Packets);
+        await called.ComeOnlineAsync();
+        await Calls.RequestAsync(caller, called);
+        await called.NextPacketsAsync(Packets);
 
+        await withoutMicrophone.ClickAsync();
         await withoutMicrophone.LongClickAsync();
 
-        await caller.ExpectCommandsAsync(RedLed(Led.Off), RedLed(Led.Rejected));
-        await other.ExpectCommandsAsync(RedLed(Led.Off));
-        await withoutMicrophone.ExpectCommandsAsync(RedLed(Led.Off));
-        await Calls.AssertNoCallAsync(other, caller, withoutMicrophone);
-    }
-
-    // A device with no configuration advertises no microphone either.
-    [Fact]
-    public async Task A_device_with_a_state_and_no_configuration_is_rung_and_places_a_call_as_any_other()
-    {
-        await using var harness = await ServerHarness.StartAsync();
-        var intercom = await harness.AddDeviceAsync("0x0a0001");
-        var unconfigured = await harness.AddDeviceAsync("0x0a0002");
-        await unconfigured.PublishStateAsync();
-        await intercom.ComeOnlineAsync();
-
-        await Calls.RequestAsync(intercom, unconfigured);
-        await intercom.ClickAsync();
-
-        await intercom.ExpectCommandsAsync(RedLed(Led.Off));
-        await unconfigured.ExpectCommandsAsync(RedLed(Led.Off));
-
-        await Calls.RequestAsync(unconfigured, intercom);
+        // The call rings on until the alarm takes its LEDs off. An accept would have gone on to
+        // light the caller's green LED, and a reject to blink its red one.
+        await caller.ExpectCommandsAsync(RedLed(Led.Off));
+        await called.ExpectCommandsAsync(RedLed(Led.Off));
+        await Calls.AssertNoCallAsync(called, caller);
+        await harness.AssertSentNoCommandAsync(withoutMicrophone);
     }
 
     private static async Task<TestDevice> AddDeviceWithoutMicrophoneAsync(
@@ -150,9 +127,7 @@ public sealed class MicrophoneTests
     )
     {
         var device = await harness.AddDeviceAsync(deviceId);
-        var configuration = device.DefaultConfiguration();
-        configuration["audio_formats"]!.AsObject().Remove("in");
-        await device.PublishConfigurationAsync(configuration);
+        await device.PublishConfigurationAsync(device.ConfigurationWithoutMicrophone());
         await device.PublishStateAsync();
         return device;
     }

@@ -10,6 +10,7 @@ internal class Server(
     IMqttClient client,
     ServerConfiguration configuration,
     DevicesConfiguration devicesConfiguration,
+    DoorbellConfiguration doorbellConfiguration,
     DeviceManager devices,
     StateManager state,
     AlarmManager alarmManager,
@@ -259,7 +260,11 @@ internal class Server(
                 if (message.ConvertPayloadToString() == "true")
                 {
                     playbackManager.StartPlayback(
-                        devices.GetAllEnabled(),
+                        devices
+                            .GetAllOnline()
+                            .Where(p =>
+                                p.CanTakeCall || doorbellConfiguration.ExtraDevices.Contains(p.DeviceId)
+                            ),
                         Constants.AudioFiles.Doorbell
                     );
                 }

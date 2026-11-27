@@ -109,6 +109,14 @@ internal sealed class TestDevice : IAsyncDisposable
             ["endpoint"] = Endpoint,
         };
 
+    /// <summary>The default configuration with no <c>in</c> format: a device without a microphone.</summary>
+    public JsonObject ConfigurationWithoutMicrophone()
+    {
+        var configuration = DefaultConfiguration();
+        configuration["audio_formats"]!.AsObject().Remove("in");
+        return configuration;
+    }
+
     public static JsonObject Mono16Khz16Bit() =>
         new()
         {

@@ -171,6 +171,26 @@ internal sealed class ServerHarness : IAsyncDisposable
 
     public Task RingDoorbellAsync() => PublishAsync("intercom/server/set/ring_doorbell", "true");
 
+    // A command topic the server neither reads nor publishes on.
+    private const string MarkerSubtopic = "set/test_marker";
+
+    /// <summary>
+    /// Asserts the server sent <paramref name="device"/> no command, beyond what the test took
+    /// from it, before a message the test has since received from the server: a marker published
+    /// to the device now is its next command. The broker queues the messages to a client in the
+    /// order it handles them, and it handles the server's in the order the server sends them.
+    /// </summary>
+    public async Task AssertSentNoCommandAsync(TestDevice device)
+    {
+        await PublishAsync($"{device.Prefix}/{device.DeviceId}/{MarkerSubtopic}", "marker");
+
+        var command = await device.NextCommandAsync();
+        Assert.True(
+            command.Subtopic == MarkerSubtopic,
+            $"Device {device.DeviceId} was sent {command.Subtopic} {command.Payload}."
+        );
+    }
+
     /// <summary>Asks the server's health endpoint, as Kubernetes' probes do.</summary>
     public async Task<(HttpStatusCode Status, string Body)> GetHealthAsync(string path)
     {

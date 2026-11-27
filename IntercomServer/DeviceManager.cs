@@ -31,9 +31,9 @@ internal class DeviceManager
         return GetWhere(p => p.State != null && p.State.Online.GetValueOrDefault());
     }
 
-    public IEnumerable<Device> GetAllEnabled()
+    public IEnumerable<Device> GetAllCallCapable()
     {
-        return GetAllOnline().Where(p => p.State!.Enabled.GetValueOrDefault());
+        return GetWhere(p => p.CanTakeCall);
     }
 
     public void Remove(Device device)

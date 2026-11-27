@@ -4,9 +4,9 @@ using static IntercomServer.Tests.Harness.Commands;
 namespace IntercomServer.Tests;
 
 /// <summary>
-/// A click with no call waiting or on asks for a call. It rings every other device that is
-/// online and enabled: each one's red LED blinks, as the caller's does, and the ring plays to
-/// them in a loop. With nobody to ring, the caller's red LED says the call is not possible. A
+/// A click with no call waiting or on asks for a call. It rings every other device that can take
+/// one, online, enabled and with a microphone (<c>MicrophoneTests</c>): each one's red LED blinks,
+/// as the caller's does, and the ring plays to them in a loop. With nobody to ring, the caller's red LED says the call is not possible. A
 /// ringing call ends when the caller clicks again, when 15 seconds pass (<c>UnansweredCallTests</c>),
 /// when a device accepts it (<c>CallTests</c>), or when a long click rejects it, which plays the
 /// rejected tone to the caller.

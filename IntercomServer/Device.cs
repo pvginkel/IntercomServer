@@ -36,6 +36,16 @@ internal class Device(string topicPrefix, string deviceId)
     /// </summary>
     public AudioFormat? InputFormat => Supported(Configuration?.AudioFormats?.In);
 
+    /// <summary>
+    /// Whether the device advertises an <c>audio_formats.in</c>, in any format: a call's audio
+    /// goes from device to device, and a conversation also needs an <see cref="InputFormat"/>. A
+    /// device without a microphone is never offered a call or a ChatGPT conversation.
+    /// </summary>
+    public bool HasMicrophone => Configuration?.AudioFormats?.In != null;
+
+    /// <summary>Whether the device can take a call: online, enabled, and with a microphone.</summary>
+    public bool CanTakeCall => State is { Online: true, Enabled: true } && HasMicrophone;
+
     // The server's audio paths carry mono 16-bit PCM. The rates span telephony to studio audio,
     // and bound what a configuration from the network makes the server decode and hold.
     private static AudioFormat? Supported(DeviceAudioFormat? format) =>

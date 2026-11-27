@@ -87,6 +87,14 @@ internal partial class Program
                 };
                 devicesConfiguration.Validate();
                 services.AddSingleton(devicesConfiguration);
+                var doorbellConfiguration = new DoorbellConfiguration
+                {
+                    ExtraDevices = env("DOORBELL_EXTRA_DEVICES") is { Length: > 0 } extraDevices
+                        ? extraDevices.Split(',', StringSplitOptions.TrimEntries)
+                        : new DoorbellConfiguration().ExtraDevices,
+                };
+                doorbellConfiguration.Validate();
+                services.AddSingleton(doorbellConfiguration);
                 services.AddSingleton(
                     Validated(new ChatGptConfiguration
                     {

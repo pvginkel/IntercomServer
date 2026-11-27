@@ -91,6 +91,19 @@ internal class StateManager
 
     public async Task HandleDeviceAction(Device device, DeviceAction action)
     {
+        // A device without a microphone takes no part in a call or a conversation, so its button
+        // changes neither: it places, joins, accepts and rejects no call, and leaves a ringing
+        // call's alarm set.
+        if (!device.HasMicrophone)
+        {
+            Logger.Information(
+                "Device {Device} has no microphone, so its {DeviceAction} does nothing",
+                device.DeviceId,
+                action
+            );
+            return;
+        }
+
         _callingAlarm?.Dispose();
         _callingAlarm = null;
 
@@ -179,7 +192,7 @@ internal class StateManager
         // A device that is in a ChatGPT conversation is busy and is not rung.
         _ringing.Clear();
         _ringing.AddRange(
-            _devices.GetAllEnabled().Where(p => p != device && !_conversation.IsChatting(p))
+            _devices.GetAllCallCapable().Where(p => p != device && !_conversation.IsChatting(p))
         );
 
         if (_ringing.Count == 0)
