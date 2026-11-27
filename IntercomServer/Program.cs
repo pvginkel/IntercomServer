@@ -79,6 +79,14 @@ internal partial class Program
                         Password = env("MQTT_PASSWORD")
                     }
                 );
+                var devicesConfiguration = new DevicesConfiguration
+                {
+                    TopicPrefixes = env("DEVICES_TOPIC_PREFIXES") is { Length: > 0 } topicPrefixes
+                        ? topicPrefixes.Split(',', StringSplitOptions.TrimEntries)
+                        : new DevicesConfiguration().TopicPrefixes,
+                };
+                devicesConfiguration.Validate();
+                services.AddSingleton(devicesConfiguration);
                 services.AddSingleton(
                     Validated(new ChatGptConfiguration
                     {

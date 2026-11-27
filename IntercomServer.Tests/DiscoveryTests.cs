@@ -4,10 +4,12 @@ namespace IntercomServer.Tests;
 
 /// <summary>
 /// How the server learns its devices: from the <c>configuration</c> and <c>state</c> each one
-/// publishes under <c>intercom/client</c>, and nowhere else. A device is reached, here by the
-/// doorbell, while its latest state is online and enabled. A check that a device got nothing
-/// stands on a control device that the same sound, or a later one, reached: had the device
-/// been reached, its packets would have gone out beside or before the control's.
+/// publishes under a prefix in <c>DEVICES_TOPIC_PREFIXES</c>, <c>intercom/client</c> and
+/// <c>toilet_automation</c> by default, and nowhere else. It sends a device its commands under
+/// the prefix it found the device under. A device is reached, here by the doorbell, while its
+/// latest state is online and enabled. A check that a device got nothing stands on a control
+/// device that the same sound, or a later one, reached: had the device been reached, its packets
+/// would have gone out beside or before the control's.
 /// </summary>
 public sealed class DiscoveryTests
 {
@@ -127,26 +129,67 @@ public sealed class DiscoveryTests
     }
 
     [Fact]
-    public async Task A_device_under_another_prefix_is_not_discovered()
+    public async Task A_device_under_either_default_prefix_is_discovered_and_sent_its_commands_under_it()
     {
         await using var harness = await ServerHarness.StartAsync();
         var intercom = await harness.AddDeviceAsync("0x0a0001");
         var other = await harness.AddDeviceAsync("0x0b0001", "toilet_automation");
         await intercom.ComeOnlineAsync();
         await other.ComeOnlineAsync();
-        await other.ClickAsync();
 
         await harness.RingDoorbellAsync();
 
         await intercom.NextPacketsAsync(Packets);
-        Assert.Equal(0, other.ReceivedPacketCount);
+        await other.NextPacketsAsync(Packets);
 
-        // Had the server known the other device, the intercom's click would ring it; had the
-        // other device's click acted, it would have rung the intercom first. Either way the
-        // intercom's first command would not be "call not possible".
-        await intercom.ClickAsync();
+        // A call sends each device every command there is, each on the device's own topics, and
+        // the other device's clicks answer and end it.
+        await Calls.StartAsync(intercom, other);
+        await Calls.EndAsync(other, intercom, other);
+    }
 
-        (await intercom.NextCommandAsync()).AssertIs("set/red_led", """{"state":"on","duration":1000}""");
-        Assert.Equal(0, other.ReceivedCommandCount);
+    [Fact]
+    public async Task The_setting_names_the_prefixes_and_a_device_under_any_other_is_not_discovered()
+    {
+        await using var harness = await ServerHarness.StartAsync(
+            new Dictionary<string, string?> { ["DEVICES_TOPIC_PREFIXES"] = "intercom/client, test/devices" }
+        );
+        var intercom = await harness.AddDeviceAsync("0x0a0001");
+        var named = await harness.AddDeviceAsync("0x0c0001", "test/devices");
+        var unnamed = await harness.AddDeviceAsync("0x0b0001", "toilet_automation");
+        await intercom.ComeOnlineAsync();
+        await named.ComeOnlineAsync();
+        await unnamed.ComeOnlineAsync();
+        await unnamed.ClickAsync();
+
+        await harness.RingDoorbellAsync();
+
+        await intercom.NextPacketsAsync(Packets);
+        await named.NextPacketsAsync(Packets);
+        Assert.Equal(0, unnamed.ReceivedPacketCount);
+
+        // Had the server read the unnamed device's click, that click would have placed a call,
+        // and sent the device the blink of a call being placed before the doorbell rang.
+        await Calls.RequestAsync(intercom, named);
+        Assert.Equal(0, unnamed.ReceivedCommandCount);
+    }
+
+    [Theory]
+    [InlineData("intercom/+")]
+    [InlineData("toilet_automation/#")]
+    [InlineData("intercom/client,")]
+    [InlineData("/intercom/client")]
+    [InlineData("intercom//client")]
+    [InlineData("intercom/client/")]
+    [InlineData("intercom/client,intercom/client/kitchen")]
+    public async Task A_setting_with_a_prefix_the_server_cannot_read_devices_under_stops_its_start(
+        string prefixes
+    )
+    {
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ServerHarness.StartAsync(new Dictionary<string, string?> { ["DEVICES_TOPIC_PREFIXES"] = prefixes })
+        );
+
+        Assert.StartsWith("DEVICES_TOPIC_PREFIXES holds ", error.Message);
     }
 }

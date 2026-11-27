@@ -9,6 +9,7 @@ namespace IntercomServer;
 internal class Server(
     IMqttClient client,
     ServerConfiguration configuration,
+    DevicesConfiguration devicesConfiguration,
     DeviceManager devices,
     StateManager state,
     AlarmManager alarmManager,
@@ -16,8 +17,16 @@ internal class Server(
 ) : IAsyncDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<Server>();
-    private static readonly Regex TopicRe =
-        new("^intercom/(?:server|client/([^/]*))/(.*)$", RegexOptions.Compiled);
+
+    // What the server reads under each device's prefix, in the order it subscribes to them.
+    private static readonly string[] DeviceTopics = ["state", "ready", "configuration", "set/action"];
+
+    private readonly Regex _topicRe = new(
+        "^(?:intercom/server|(?<prefix>"
+            + string.Join('|', devicesConfiguration.TopicPrefixes.Select(Regex.Escape))
+            + ")/(?<device>[^/]*))/(?<topic>.*)$",
+        RegexOptions.Compiled
+    );
 
     private static readonly TimeSpan InitialReconnectDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxReconnectDelay = TimeSpan.FromSeconds(30);
@@ -108,16 +117,11 @@ internal class Server(
         // Subscriptions don't survive a reconnect (clean session), so (re)establish them on every
         // successful connect.
         await client.SubscribeAsync("intercom/server/set/+", cancellationToken: cancellationToken);
-        await client.SubscribeAsync("intercom/client/+/state", cancellationToken: cancellationToken);
-        await client.SubscribeAsync("intercom/client/+/ready", cancellationToken: cancellationToken);
-        await client.SubscribeAsync(
-            "intercom/client/+/configuration",
-            cancellationToken: cancellationToken
-        );
-        await client.SubscribeAsync(
-            "intercom/client/+/set/action",
-            cancellationToken: cancellationToken
-        );
+        foreach (var prefix in devicesConfiguration.TopicPrefixes)
+        {
+            foreach (var topic in DeviceTopics)
+                await client.SubscribeAsync($"{prefix}/+/{topic}", cancellationToken: cancellationToken);
+        }
 
         _subscribed = true;
     }
@@ -221,7 +225,7 @@ internal class Server(
 
     private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e)
     {
-        var match = TopicRe.Match(e.ApplicationMessage.Topic);
+        var match = _topicRe.Match(e.ApplicationMessage.Topic);
         if (!match.Success)
         {
             throw new InvalidOperationException(
@@ -229,8 +233,8 @@ internal class Server(
             );
         }
 
-        var deviceId = match.Groups[1].Value;
-        var topic = match.Groups[2].Value;
+        var deviceId = match.Groups["device"].Value;
+        var topic = match.Groups["topic"].Value;
 
         using (await _syncRoot.EnterAsync())
         {
@@ -240,7 +244,7 @@ internal class Server(
             }
             else
             {
-                var device = devices.GetById(deviceId);
+                var device = devices.GetOrAdd(match.Groups["prefix"].Value, deviceId);
 
                 await HandleClientMessage(topic, device, e.ApplicationMessage);
             }

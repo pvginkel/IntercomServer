@@ -8,7 +8,7 @@ using MQTTnet;
 namespace IntercomServer;
 
 [DebuggerDisplay("DeviceId = {DeviceId}, State = {State}, Configuration = {Configuration}")]
-internal class Device(string deviceId)
+internal class Device(string topicPrefix, string deviceId)
 {
     private static readonly JsonSerializerOptions JsonSerializerOptions =
         new()
@@ -16,6 +16,9 @@ internal class Device(string deviceId)
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
+
+    /// <summary>The topic prefix the device was found under, and is sent its commands under.</summary>
+    public string TopicPrefix { get; } = topicPrefix;
 
     public string DeviceId { get; } = deviceId;
     public DeviceConfiguration? Configuration { get; private set; }
@@ -61,7 +64,7 @@ internal class Device(string deviceId)
     public async Task SetRedLed(IMqttClient client, DeviceLedAction action)
     {
         await client.PublishStringAsync(
-            $"intercom/client/{DeviceId}/set/red_led",
+            Topic("set/red_led"),
             JsonSerializer.Serialize(action, JsonSerializerOptions)
         );
     }
@@ -69,7 +72,7 @@ internal class Device(string deviceId)
     public async Task SetGreenLed(IMqttClient client, DeviceLedAction action)
     {
         await client.PublishStringAsync(
-            $"intercom/client/{DeviceId}/set/green_led",
+            Topic("set/green_led"),
             JsonSerializer.Serialize(action, JsonSerializerOptions)
         );
     }
@@ -77,21 +80,20 @@ internal class Device(string deviceId)
     public async Task SetRecording(IMqttClient client, bool value)
     {
         await client.PublishStringAsync(
-            $"intercom/client/{DeviceId}/set/recording",
+            Topic("set/recording"),
             JsonSerializer.Serialize(value, JsonSerializerOptions)
         );
     }
 
     public async Task AddEndpoint(IMqttClient client, string endpoint)
     {
-        await client.PublishStringAsync($"intercom/client/{DeviceId}/set/add_endpoint", endpoint);
+        await client.PublishStringAsync(Topic("set/add_endpoint"), endpoint);
     }
 
     public async Task RemoveEndpoint(IMqttClient client, string endpoint)
     {
-        await client.PublishStringAsync(
-            $"intercom/client/{DeviceId}/set/remove_endpoint",
-            endpoint
-        );
+        await client.PublishStringAsync(Topic("set/remove_endpoint"), endpoint);
     }
+
+    private string Topic(string subtopic) => $"{TopicPrefix}/{DeviceId}/{subtopic}";
 }

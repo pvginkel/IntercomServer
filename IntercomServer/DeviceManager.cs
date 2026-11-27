@@ -6,11 +6,16 @@ internal class DeviceManager
 
     public event EventHandler<DeviceEventArgs>? DeviceRemoved;
 
-    public Device GetById(string deviceId)
+    /// <summary>
+    /// The device of <paramref name="deviceId"/>, added under <paramref name="topicPrefix"/>, the
+    /// prefix it was found under, when it is new. A device is known by its id alone: ids are
+    /// unique across prefixes.
+    /// </summary>
+    public Device GetOrAdd(string topicPrefix, string deviceId)
     {
         if (!_devices.TryGetValue(deviceId, out var device))
         {
-            device = new Device(deviceId);
+            device = new Device(topicPrefix, deviceId);
             _devices.Add(deviceId, device);
         }
         return device;
