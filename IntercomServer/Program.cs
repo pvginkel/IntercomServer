@@ -58,7 +58,9 @@ internal partial class Program
                 // Start the health endpoint before Service so the liveness/readiness probes are answered
                 // immediately — including while Service.StartAsync is still dialing the MQTT broker and
                 // discovering MCP servers (which can block). Hosted services start in registration order.
+                // The sounds are decoded before Service connects, so nothing plays before they are.
                 services.AddHostedService<HealthEndpointService>();
+                services.AddHostedService(p => p.GetRequiredService<SoundLibrary>());
                 services.AddHostedService<Service>();
                 services.AddSingleton(
                     new HealthEndpointConfiguration
@@ -141,6 +143,8 @@ internal partial class Program
                 services.AddSingleton<MqttClientFactory>();
                 services.AddSingleton<AlarmManager>();
                 services.AddSingleton<PlaybackManager>();
+                services.AddSingleton(new AudioDecoder("ffmpeg"));
+                services.AddSingleton<SoundLibrary>();
                 services.AddSingleton<AudioSender>();
                 services.AddSingleton(p => new UdpAudioServer(
                     p.GetRequiredService<AudioServerConfiguration>().Port

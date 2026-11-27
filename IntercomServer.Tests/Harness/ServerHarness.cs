@@ -60,9 +60,12 @@ internal sealed class ServerHarness : IAsyncDisposable
     /// Starts a broker and the server, and returns once the server reports ready: connected to
     /// the broker and subscribed. <paramref name="settings"/> adds to, or overrides, the
     /// settings the harness gives the server, by their environment variable names.
+    /// <paramref name="services"/> replaces registrations of the server's composition, for what
+    /// no setting reaches: the FFmpeg the server runs.
     /// </summary>
     public static async Task<ServerHarness> StartAsync(
-        IReadOnlyDictionary<string, string?>? settings = null
+        IReadOnlyDictionary<string, string?>? settings = null,
+        Action<IServiceCollection>? services = null
     )
     {
         var broker = await TestBroker.StartAsync();
@@ -70,7 +73,7 @@ internal sealed class ServerHarness : IAsyncDisposable
 
         try
         {
-            return await StartServerAsync(broker, dataDirectory, settings);
+            return await StartServerAsync(broker, dataDirectory, settings, services);
         }
         catch
         {
@@ -83,7 +86,8 @@ internal sealed class ServerHarness : IAsyncDisposable
     private static async Task<ServerHarness> StartServerAsync(
         TestBroker broker,
         string dataDirectory,
-        IReadOnlyDictionary<string, string?>? settings
+        IReadOnlyDictionary<string, string?>? settings,
+        Action<IServiceCollection>? services
     )
     {
         var (host, healthPort) = await FreePort.StartAsync(async port =>
@@ -101,7 +105,11 @@ internal sealed class ServerHarness : IAsyncDisposable
             foreach (var (name, value) in settings ?? new Dictionary<string, string?>())
                 serverSettings[name] = value;
 
-            var host = Program.CreateHostBuilder(name => serverSettings.GetValueOrDefault(name)).Build();
+            var builder = Program.CreateHostBuilder(name => serverSettings.GetValueOrDefault(name));
+            if (services != null)
+                builder.ConfigureServices(services);
+
+            var host = builder.Build();
             try
             {
                 using var timeout = new CancellationTokenSource(Timeouts.Observe);
@@ -109,6 +117,8 @@ internal sealed class ServerHarness : IAsyncDisposable
             }
             catch
             {
+                // A start that failed after the health endpoint started leaves it listening.
+                await host.StopAsync();
                 await ((IAsyncDisposable)host).DisposeAsync();
                 throw;
             }

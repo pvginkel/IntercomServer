@@ -1,4 +1,5 @@
-﻿using IntercomServer.Utils;
+﻿using System.Collections.Immutable;
+using IntercomServer.Utils;
 using IntercomServer.Utils.Audio;
 
 namespace IntercomServer;
@@ -26,5 +27,7 @@ internal class Constants
         public const string Doorbell = "doorbell.mp3";
         public const string Rejected = "rejected.mp3";
         public const string Ring = "ring.mp3";
+
+        public static readonly ImmutableArray<string> All = [Doorbell, Rejected, Ring];
     }
 }

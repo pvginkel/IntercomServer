@@ -1,13 +1,10 @@
 ﻿using System.Collections.Immutable;
 using System.Net;
-using NAudio.Wave;
-using NAudio.Wave.SampleProviders;
-using NLayer.NAudioSupport;
 using Serilog;
 
 namespace IntercomServer;
 
-internal class PlaybackManager(AudioSender sender)
+internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
 {
     private static readonly ILogger Logger = Log.ForContext<PlaybackManager>();
 
@@ -38,9 +35,7 @@ internal class PlaybackManager(AudioSender sender)
             token = _cancellationTokenSource.Token;
         }
 
-        var stream = DecodeFile(fileName);
-
-        RunPlayback([.. devices], stream, configuration, token);
+        RunPlayback([.. devices], sounds.Open(fileName), configuration, token);
     }
 
     private async void RunPlayback(
@@ -72,61 +67,6 @@ internal class PlaybackManager(AudioSender sender)
         {
             Logger.Error(ex, "Playback failed");
         }
-    }
-
-    private Stream DecodeFile(string fileName)
-    {
-        using var stream = GetType()
-            .Assembly.GetManifestResourceStream($"{GetType().Namespace}.AudioFiles.{fileName}");
-
-        var result = new MemoryStream();
-
-        var builder = new Mp3FileReaderBase.FrameDecompressorBuilder(p => new Mp3FrameDecompressor(
-            p
-        ));
-
-        using (var reader = new Mp3FileReaderBase(stream, builder))
-        {
-            var targetFormat = new WaveFormat(
-                Constants.AudioFormat.SampleRate,
-                Constants.AudioFormat.BitRate,
-                Constants.AudioFormat.ChannelCount
-            );
-
-            var sampleProvider = reader.ToSampleProvider();
-
-            if (sampleProvider.WaveFormat.SampleRate != targetFormat.SampleRate)
-            {
-                sampleProvider = new WdlResamplingSampleProvider(
-                    sampleProvider,
-                    targetFormat.SampleRate
-                );
-            }
-
-            if (sampleProvider.WaveFormat.Channels != targetFormat.Channels)
-            {
-                sampleProvider = targetFormat.Channels switch
-                {
-                    1 => new StereoToMonoSampleProvider(sampleProvider),
-                    2 => new MonoToStereoSampleProvider(sampleProvider),
-                    _ => sampleProvider
-                };
-            }
-
-            var waveProvider = new SampleToWaveProvider16(sampleProvider);
-
-            var buffer = new byte[waveProvider.WaveFormat.AverageBytesPerSecond];
-
-            int read;
-            while ((read = waveProvider.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                result.Write(buffer, 0, read);
-            }
-        }
-
-        result.Position = 0;
-
-        return result;
     }
 }
 
