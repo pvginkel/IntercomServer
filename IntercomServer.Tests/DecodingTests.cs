@@ -115,6 +115,25 @@ public sealed class DecodingTests
     }
 
     [Fact]
+    public async Task A_decode_that_fails_is_not_kept_and_the_next_playback_decodes_again()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        // A rate FFmpeg refuses, which no device can make the server decode at.
+        var refused = new AudioFormat(AudioChannelLayout.Mono, -1, 16);
+
+        var first = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            BuiltInSounds.DecodedAsync(harness, Constants.AudioFiles.Doorbell, refused)
+        );
+        var second = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            BuiltInSounds.DecodedAsync(harness, Constants.AudioFiles.Doorbell, refused)
+        );
+
+        // A decode that was kept would fail the second playback with the first one's error.
+        Assert.StartsWith("FFmpeg could not decode doorbell.mp3: it exited with code ", second.Message);
+        Assert.NotSame(first, second);
+    }
+
+    [Fact]
     public async Task A_server_without_FFmpeg_stops_at_its_start_saying_FFmpeg_is_missing()
     {
         var missing = Path.Combine(Path.GetTempPath(), $"no-ffmpeg-{Guid.NewGuid():N}", "ffmpeg");
