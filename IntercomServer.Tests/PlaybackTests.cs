@@ -5,12 +5,19 @@ namespace IntercomServer.Tests;
 
 /// <summary>
 /// How a sound plays: a looped one, the ring a call request plays to the devices it rings,
-/// goes on until it is cancelled. The server plays one sound at a time, so a new one cancels
-/// the one before it on every device, the devices it does not reach included. A sound to
-/// devices of which one cannot be sent to reaches none of them.
+/// goes on until it is cancelled. Each device has a playback of its own, so a new sound
+/// replaces what the devices it reaches were playing, and nothing else. A device the server
+/// cannot send to is skipped, and the others play.
 /// </summary>
 public sealed class PlaybackTests
 {
+    // A fifth of a second of the doorbell, one packet each 20 ms.
+    private const int Packets = 10;
+
+    // The doorbell's first packets to a ringing device may race the ring's last, so a tenth of a
+    // second of them is left out of a comparison.
+    private const int RaceAllowance = 5;
+
     [Fact]
     public async Task A_looped_sound_plays_on_past_its_end_until_it_is_cancelled()
     {
@@ -43,70 +50,108 @@ public sealed class PlaybackTests
     }
 
     [Fact]
-    public async Task A_new_sound_cancels_the_one_before_it_on_every_device()
+    public async Task A_new_sound_replaces_what_the_devices_it_reaches_were_playing_and_nothing_else()
     {
         await using var harness = await ServerHarness.StartAsync();
         var caller = await harness.AddDeviceAsync("0x0a0001");
-        var called = await harness.AddDeviceAsync("0x0a0002");
+        var reached = await harness.AddDeviceAsync("0x0a0002");
+        var passedOver = await harness.AddDeviceAsync("0x0a0003");
         await caller.ComeOnlineAsync();
-        await called.ComeOnlineAsync();
+        await reached.ComeOnlineAsync();
+        await passedOver.ComeOnlineAsync();
 
         await caller.ClickAsync();
-        await called.NextPacketsAsync(5);
-        // Disabled, the called device rings on, and the doorbell does not reach it.
-        await called.PublishStateAsync(enabled: false);
+        await reached.NextPacketsAsync(5);
+        await passedOver.NextPacketsAsync(5);
+        // Disabled, it rings on, and the doorbell does not reach it.
+        await passedOver.PublishStateAsync(enabled: false);
 
         await harness.RingDoorbellAsync();
 
-        var doorbell = await caller.NextPacketsAsync(25);
+        var doorbell = await caller.NextSoundAsync(BuiltInSounds.DoorbellLength + BuiltInSounds.Margin);
 
-        // One counter numbers every packet the server sends, so an index orders the sends. The
-        // ring's last send can race the doorbell's first.
-        var ringedOn = called.TakeArrivedPackets().Count(p => p.Index > doorbell[0].Index);
-        Assert.True(ringedOn <= 1, $"The ring sent {ringedOn} packets after the doorbell started.");
+        // The device the doorbell reached ends on it: had the ring played on beside it, or after
+        // it, ring packets would sit among or after the doorbell's.
+        var toReached = reached.TakeArrivedPackets();
+        Assert.True(
+            AudioPacket.SameAudio(
+                doorbell.Skip(RaceAllowance),
+                toReached.TakeLast(doorbell.Count - RaceAllowance)
+            ),
+            $"The reached device's last {doorbell.Count - RaceAllowance} of {toReached.Count} packets are not the doorbell's."
+        );
+
+        // The device it passed over rings on past the doorbell's end, which the caller took a
+        // second without packets to see.
+        var toPassedOver = passedOver.TakeArrivedPackets();
+        Assert.True(
+            toPassedOver.Count > 0 && toPassedOver[^1].ArrivedAfter(doorbell[^1]) > TimeSpan.FromSeconds(0.5),
+            "The ring stopped on the device the doorbell did not reach."
+        );
     }
 
     [Fact]
-    public async Task A_sound_to_a_device_without_a_configuration_reaches_none_and_the_next_one_plays()
+    public async Task A_device_without_a_configuration_is_skipped_and_the_others_play()
     {
         await using var harness = await ServerHarness.StartAsync();
-        var configured = await harness.AddDeviceAsync("0x0a0001");
-        var unconfigured = await harness.AddDeviceAsync("0x0a0002");
-        await configured.ComeOnlineAsync();
+        var unconfigured = await harness.AddDeviceAsync("0x0a0001");
+        var configured = await harness.AddDeviceAsync("0x0a0002");
         await unconfigured.PublishStateAsync();
+        await configured.ComeOnlineAsync();
 
-        await harness.RingDoorbellAsync();
-        await unconfigured.PublishConfigurationAsync();
-        await harness.RingDoorbellAsync();
-
-        await AssertNothingWentOutBefore(configured, unconfigured);
+        await AssertSkippedWhileTheOthersPlay(harness, configured, unconfigured);
     }
 
     [Fact]
-    public async Task A_sound_to_a_device_whose_configuration_has_no_endpoint_reaches_none_and_the_next_one_plays()
+    public async Task A_device_whose_configuration_has_no_endpoint_is_skipped_and_the_others_play()
     {
         await using var harness = await ServerHarness.StartAsync();
-        var configured = await harness.AddDeviceAsync("0x0a0001");
-        var noEndpoint = await harness.AddDeviceAsync("0x0a0002");
-        await configured.ComeOnlineAsync();
+        var noEndpoint = await harness.AddDeviceAsync("0x0a0001");
+        var configured = await harness.AddDeviceAsync("0x0a0002");
         var configuration = noEndpoint.DefaultConfiguration();
         configuration.Remove("endpoint");
         await noEndpoint.PublishConfigurationAsync(configuration);
         await noEndpoint.PublishStateAsync();
+        await configured.ComeOnlineAsync();
 
-        await harness.RingDoorbellAsync();
-        await noEndpoint.PublishConfigurationAsync();
-        await harness.RingDoorbellAsync();
-
-        await AssertNothingWentOutBefore(configured, noEndpoint);
+        await AssertSkippedWhileTheOthersPlay(harness, configured, noEndpoint);
     }
 
-    // The two devices' first packets are the first two the server ever sent, numbered 0 and 1
-    // by the one counter: the first doorbell sent nothing, to either of them.
-    private static async Task AssertNothingWentOutBefore(TestDevice first, TestDevice second)
+    [Fact]
+    public async Task A_device_whose_endpoint_is_no_address_is_skipped_and_the_others_play()
     {
-        var indices = new[] { (await first.NextPacketAsync()).Index, (await second.NextPacketAsync()).Index };
+        await using var harness = await ServerHarness.StartAsync();
+        var unparsable = await harness.AddDeviceAsync("0x0a0001");
+        var configured = await harness.AddDeviceAsync("0x0a0002");
+        var configuration = unparsable.DefaultConfiguration();
+        configuration["endpoint"] = "not an endpoint";
+        await unparsable.PublishConfigurationAsync(configuration);
+        await unparsable.PublishStateAsync();
+        await configured.ComeOnlineAsync();
 
-        Assert.Equal([0, 1], indices.Order());
+        await AssertSkippedWhileTheOthersPlay(harness, configured, unparsable);
+    }
+
+    // The skipped device published first, so the server knew of it before the other, which
+    // the doorbell still plays on from its first packet. Once the skipped device advertises
+    // its endpoint, the next doorbell reaches it, its first packet the first its counter
+    // numbered: nothing was sent to it before.
+    private static async Task AssertSkippedWhileTheOthersPlay(
+        ServerHarness harness,
+        TestDevice configured,
+        TestDevice skipped
+    )
+    {
+        await harness.RingDoorbellAsync();
+
+        Assert.Equal(
+            Enumerable.Range(0, Packets),
+            (await configured.NextPacketsAsync(Packets)).Select(p => p.Index)
+        );
+
+        await skipped.PublishConfigurationAsync();
+        await harness.RingDoorbellAsync();
+
+        Assert.Equal(0, (await skipped.NextPacketAsync()).Index);
     }
 }

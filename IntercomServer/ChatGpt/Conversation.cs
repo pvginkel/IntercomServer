@@ -825,7 +825,8 @@ internal sealed class Conversation
         {
             await AudioStreaming.PlayAsync(
                 _audioSender,
-                [_deviceEndpoint],
+                Device.DeviceId,
+                _deviceEndpoint,
                 _audioOut,
                 configuration: null,
                 _cts.Token

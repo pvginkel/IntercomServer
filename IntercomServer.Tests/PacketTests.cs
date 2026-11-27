@@ -1,12 +1,13 @@
 using IntercomServer.Tests.Harness;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace IntercomServer.Tests;
 
 /// <summary>
 /// What a device's UDP listener receives: 640-byte payloads, one 20 ms chunk at mono 16 kHz
-/// 16-bit each, every one behind a 4-byte big-endian packet index. One counter numbers every
-/// packet the server sends, to every device and from every stream, and runs on from one sound
-/// to the next. What a device advertises in <c>audio_formats</c> changes none of it.
+/// 16-bit each, every one behind a 4-byte big-endian packet index. Each device has a counter of
+/// its own, which numbers every packet the server sends it, from every stream, and runs on from
+/// one sound to the next. What a device advertises in <c>audio_formats</c> changes none of it.
 /// </summary>
 public sealed class PacketTests
 {
@@ -44,54 +45,102 @@ public sealed class PacketTests
     }
 
     [Fact]
-    public async Task One_counter_numbers_the_packets_to_every_device()
+    public async Task Each_device_numbers_its_packets_with_a_counter_of_its_own()
     {
         await using var harness = await ServerHarness.StartAsync();
         var first = await harness.AddDeviceAsync("0x0a0001");
         var second = await harness.AddDeviceAsync("0x0a0002");
         await first.ComeOnlineAsync();
-        await second.ComeOnlineAsync();
+        await second.PublishConfigurationAsync();
+        await second.PublishStateAsync(enabled: false);
 
+        // Disabled, the second device is not reached by this doorbell.
         await harness.RingDoorbellAsync();
+        var toFirst = await first.NextPacketsAsync(25);
 
-        var toFirst = (await first.NextPacketsAsync(25)).Select(p => p.Index).ToList();
-        var toSecond = (await second.NextPacketsAsync(25)).Select(p => p.Index).ToList();
+        // This one reaches both, and replaces the first doorbell on the first device.
+        await second.PublishStateAsync();
+        await harness.RingDoorbellAsync();
+        var toSecond = await second.NextPacketsAsync(25);
+        toFirst.AddRange(first.TakeArrivedPackets());
+        toFirst.AddRange(await first.NextPacketsAsync(25));
 
-        // Each chunk goes to one device and then the other, each send drawing the next index.
-        Assert.All(toFirst.Zip(toFirst.Skip(1)), pair => Assert.Equal(pair.First + 2, pair.Second));
-        Assert.All(toSecond.Zip(toSecond.Skip(1)), pair => Assert.Equal(pair.First + 2, pair.Second));
-        Assert.Equal(Enumerable.Range(0, 50), toFirst.Concat(toSecond).Order());
+        // The second device's counter starts at zero, whatever went to the first, and each
+        // device's packets are numbered one after another, across the two doorbells on the first.
+        Assert.Equal(Enumerable.Range(0, 25), toSecond.Select(p => p.Index));
+        Assert.Equal(Enumerable.Range(0, toFirst.Count), toFirst.Select(p => p.Index));
     }
 
     [Fact]
-    public async Task A_live_stream_through_the_servers_sender_draws_from_the_counter_a_sound_draws_from()
+    public async Task A_live_stream_to_a_device_draws_from_the_counter_its_sounds_draw_from()
     {
         await using var harness = await ServerHarness.StartAsync();
-        var ringing = await harness.AddDeviceAsync("0x0a0001");
-        await ringing.ComeOnlineAsync();
-        // It publishes nothing, so the doorbell does not reach it: it gets only the live stream.
-        var chatting = await harness.AddDeviceAsync("0x0a0002");
+        var chatting = await harness.AddDeviceAsync("0x0a0001");
+        var control = await harness.AddDeviceAsync("0x0a0002");
+        await chatting.ComeOnlineAsync();
+        await control.ComeOnlineAsync();
 
         await harness.RingDoorbellAsync();
-        var toRinging = (await ringing.NextPacketsAsync(5)).Select(p => p.Index).ToList();
+        var toChatting = await chatting.NextPacketsAsync(5);
 
-        // A fifth of a second, well within the doorbell.
+        // A fifth of a second beside the doorbell, as a ChatGPT reply plays beside it.
         await using (var reply = LivePlayback.Start(harness, chatting))
         {
             reply.Append(10);
             await reply.CompleteAsync();
         }
-        var toChatting = (await chatting.NextPacketsAsync(10)).Select(p => p.Index).ToList();
 
-        while (toRinging[^1] <= toChatting[^1])
-            toRinging.Add((await ringing.NextPacketAsync()).Index);
+        var longest = BuiltInSounds.DoorbellLength + BuiltInSounds.Margin;
+        var toControl = await control.NextSoundAsync(longest);
+        toChatting.AddRange(await chatting.NextSoundAsync(longest));
 
-        Assert.All(toChatting, index => Assert.InRange(index, toRinging[0] + 1, toRinging[^1] - 1));
-        var ringingMeanwhile = toRinging.Count(index => index >= toChatting[0] && index <= toChatting[^1]);
-        Assert.True(
-            ringingMeanwhile < toChatting[^1] - toChatting[0] + 1,
-            "The doorbell's indices did not skip the ones the live stream took."
+        // The chatting device got the doorbell and the reply, numbered as one run by its counter,
+        // and the control got the doorbell alone, numbered by its own.
+        Assert.Equal(toControl.Count + 10, toChatting.Count);
+        Assert.Equal(Enumerable.Range(0, toChatting.Count), toChatting.Select(p => p.Index));
+        Assert.Equal(Enumerable.Range(0, toControl.Count), toControl.Select(p => p.Index));
+    }
+
+    [Fact]
+    public async Task Streams_sending_to_one_device_at_once_never_share_an_index()
+    {
+        const int streams = 8;
+        const int datagrams = 200;
+
+        await using var harness = await ServerHarness.StartAsync();
+        var device = await harness.AddDeviceAsync("0x0a0001");
+        var sender = harness.Services.GetRequiredService<AudioSender>();
+
+        // A thread each, released at once, so their sends overlap.
+        using var start = new Barrier(streams);
+        await Task.WhenAll(
+            Enumerable
+                .Range(0, streams)
+                .Select(_ =>
+                    Task.Factory.StartNew(
+                        () =>
+                        {
+                            start.SignalAndWait(TestContext.Current.CancellationToken);
+                            for (var i = 0; i < datagrams; i++)
+                                sender.Send(device.DeviceId, device.AudioEndpoint, new byte[2]);
+                        },
+                        TaskCreationOptions.LongRunning
+                    )
+                )
         );
+
+        var indices = new List<int>();
+        while (await device.NextPacketWithinAsync(SoundEnded) is { } packet)
+            indices.Add(packet.Index);
+
+        // Loopback may drop datagrams sent this fast, but it neither repeats nor reorders them:
+        // each index is one of the counter's and later than the one before it.
+        Assert.NotEmpty(indices);
+        Assert.All(
+            indices.Zip(indices.Skip(1)),
+            pair => Assert.True(pair.First < pair.Second, $"Index {pair.Second} came after {pair.First}.")
+        );
+        Assert.InRange(indices[^1], 0, streams * datagrams - 1);
     }
 
     [Fact]

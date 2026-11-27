@@ -6,13 +6,15 @@ namespace IntercomServer;
 internal static class AudioStreaming
 {
     /// <summary>
-    /// Streams PCM audio from <paramref name="stream"/> to the given endpoints, paced to
-    /// real time so the receiving devices' (small) jitter buffers are not overrun. This is
-    /// the shared pacing used by both ring/doorbell playback and ChatGPT conversation audio.
+    /// Streams PCM audio from <paramref name="stream"/> to the device <paramref name="deviceId"/>
+    /// at <paramref name="endpoint"/>, paced to real time so the device's (small) jitter buffer
+    /// is not overrun. This is the shared pacing used by both ring/doorbell playback and
+    /// ChatGPT conversation audio.
     /// </summary>
     public static async Task PlayAsync(
         AudioSender sender,
-        IReadOnlyList<IPEndPoint> endpoints,
+        string deviceId,
+        IPEndPoint endpoint,
         Stream stream,
         PlaybackConfiguration? configuration,
         CancellationToken cancellationToken
@@ -50,8 +52,7 @@ internal static class AudioStreaming
             if (stopwatch.Elapsed - beforeRead > idleThreshold)
                 sent = stopwatch.Elapsed;
 
-            foreach (var endpoint in endpoints)
-                sender.Send(endpoint, buffer.AsSpan(0, read));
+            sender.Send(deviceId, endpoint, buffer.AsSpan(0, read));
 
             sent += TimeSpan.FromSeconds((double)read / Constants.AudioFormat.BytesPerSecond);
 

@@ -7,9 +7,10 @@ namespace IntercomServer.Tests.Harness;
 /// <summary>
 /// The path a ChatGPT reply takes to a device, with the test in OpenAI's place: the ChatGPT
 /// bridge's <see cref="LiveAudioStream"/>, played by <see cref="AudioStreaming.PlayAsync"/>
-/// through the server's own <see cref="AudioSender"/>, as <c>Conversation</c> plays it. It is
-/// the one source the server has that blocks, so it is how a test shows a late chunk or a stall.
-/// The stream has no pre-roll, so audio leaves as soon as the test appends it.
+/// through the server's own <see cref="AudioSender"/> under the device's id, as
+/// <c>Conversation</c> plays it. It is the one source the server has that blocks, so it is how
+/// a test shows a late chunk or a stall. The stream has no pre-roll, so audio leaves as soon as
+/// the test appends it.
 /// </summary>
 internal sealed class LivePlayback : IAsyncDisposable
 {
@@ -22,11 +23,12 @@ internal sealed class LivePlayback : IAsyncDisposable
     private readonly CancellationTokenSource _stopping = new();
     private readonly Task _playing;
 
-    private LivePlayback(AudioSender sender, IPEndPoint endpoint)
+    private LivePlayback(AudioSender sender, string deviceId, IPEndPoint endpoint)
     {
         _playing = AudioStreaming.PlayAsync(
             sender,
-            [endpoint],
+            deviceId,
+            endpoint,
             _stream,
             configuration: null,
             _stopping.Token
@@ -35,7 +37,7 @@ internal sealed class LivePlayback : IAsyncDisposable
 
     /// <summary>Starts playing to <paramref name="device"/>'s endpoint; nothing goes out until audio is appended.</summary>
     public static LivePlayback Start(ServerHarness harness, TestDevice device) =>
-        new(harness.Services.GetRequiredService<AudioSender>(), device.AudioEndpoint);
+        new(harness.Services.GetRequiredService<AudioSender>(), device.DeviceId, device.AudioEndpoint);
 
     /// <summary>Appends <paramref name="chunks"/> chunks of silence at once, as a burst of OpenAI's audio arrives.</summary>
     public void Append(int chunks) => _stream.Append(new byte[chunks * ChunkBytes]);

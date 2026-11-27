@@ -1,25 +1,23 @@
-﻿using System.Collections.Immutable;
-using System.Net;
+﻿using System.Net;
 using Serilog;
 
 namespace IntercomServer;
 
+/// <summary>
+/// Plays the built-in sounds, a playback of its own on each device: a sound started on some
+/// devices replaces what those devices were playing, and nothing else.
+/// </summary>
 internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
 {
     private static readonly ILogger Logger = Log.ForContext<PlaybackManager>();
 
     private readonly Lock _syncRoot = new();
-    private CancellationTokenSource? _cancellationTokenSource;
+    private readonly Dictionary<string, CancellationTokenSource> _playbacks = new();
 
-    public void CancelPlayback()
-    {
-        lock (_syncRoot)
-        {
-            _cancellationTokenSource?.Cancel();
-            _cancellationTokenSource = null;
-        }
-    }
-
+    /// <summary>
+    /// Plays <paramref name="fileName"/> on each of <paramref name="devices"/>. A device without an
+    /// endpoint the server can send to is logged and skipped, and the others play.
+    /// </summary>
     public void StartPlayback(
         IEnumerable<Device> devices,
         string fileName,
@@ -27,19 +25,45 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
         CancellationToken token = default
     )
     {
-        lock (_syncRoot)
+        foreach (var device in devices)
         {
-            _cancellationTokenSource?.Cancel();
-            _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token);
+            if (
+                device.Configuration?.Endpoint is not { } advertised
+                || !IPEndPoint.TryParse(advertised, out var endpoint)
+            )
+            {
+                Logger.Warning(
+                    "Device {Device} has no audio endpoint the server can send to, so it does not play {Sound}",
+                    device.DeviceId,
+                    fileName
+                );
+                continue;
+            }
 
-            token = _cancellationTokenSource.Token;
+            var playback = CancellationTokenSource.CreateLinkedTokenSource(token);
+            CancellationTokenSource? replaced;
+
+            lock (_syncRoot)
+            {
+                _playbacks.Remove(device.DeviceId, out replaced);
+                _playbacks.Add(device.DeviceId, playback);
+            }
+
+            replaced?.Cancel();
+
+            RunPlayback(
+                device.DeviceId,
+                endpoint,
+                sounds.Open(fileName),
+                configuration,
+                playback.Token
+            );
         }
-
-        RunPlayback([.. devices], sounds.Open(fileName), configuration, token);
     }
 
     private async void RunPlayback(
-        ImmutableArray<Device> devices,
+        string deviceId,
+        IPEndPoint endpoint,
         Stream stream,
         PlaybackConfiguration? configuration,
         CancellationToken cancellationToken
@@ -47,13 +71,10 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
     {
         try
         {
-            var endpoints = devices
-                .Select(device => IPEndPoint.Parse(device.Configuration!.Endpoint!))
-                .ToList();
-
             await AudioStreaming.PlayAsync(
                 sender,
-                endpoints,
+                deviceId,
+                endpoint,
                 stream,
                 configuration,
                 cancellationToken
@@ -65,7 +86,7 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "Playback failed");
+            Logger.Error(ex, "Playback failed for device {Device}", deviceId);
         }
     }
 }
