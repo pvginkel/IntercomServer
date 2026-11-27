@@ -16,6 +16,10 @@ repos:
   # The deploy repo: the chart, its prd config (the image pin Jenkins writes)
   # and its Terraform. Slices change it beside this repo.
   - url: https://github.com/pvginkel/IntercomDeploy
+  # The Android app that manages the ambient sound tracks (the ambient sound
+  # design's §4). It is developed in this environment so that the server's API
+  # and its client change in one session.
+  - url: https://github.com/pvginkel/IntercomClient
 
 tools:
   # The .NET 8 and 9 SDKs side by side. Everything here targets net9.0 and there
@@ -29,6 +33,10 @@ tools:
   # helm and terraform: IntercomDeploy's test and lint verbs, which slices that
   # change the deploy repo are gated on.
   - use: iac
+  # The Android SDK, for IntercomClient's build and test verbs. Its sidecar's
+  # memory limit counts on the node whenever this environment runs, server-only
+  # sessions included: the price of developing the app beside its API.
+  - use: android
 
 # The repo ships a Dockerfile: a runtime image laid over the `publish/` output
 # of `dotnet publish`. Jenkins builds it with helmCharts.kaniko2; this opt-in is
