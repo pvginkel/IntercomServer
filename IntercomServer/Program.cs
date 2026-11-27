@@ -171,36 +171,25 @@ internal partial class Program
                         ),
                         // Required when the feature is enabled; ChatGptConfiguration.Validate enforces it.
                         CloseOutPrompt = ResolveFileOrDefault("CHATGPT_CLOSE_OUT_PROMPT_FILE", ""),
-                        CloseOutTimeoutSeconds = int.TryParse(
-                            env("CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS"),
-                            out var closeOutTimeout
-                        )
-                            ? closeOutTimeout
+                        CloseOutTimeoutSeconds = env("CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS") is { Length: > 0 } closeOutTimeout
+                            ? int.Parse(closeOutTimeout, CultureInfo.InvariantCulture)
                             : new ChatGptConfiguration().CloseOutTimeoutSeconds,
                         McpConfigFile = env("MCP_CONFIG_FILE") is { Length: > 0 } mcpFile
                             ? mcpFile
                             : "mcpservers.json",
                         DataDirectory = dataConfiguration.Directory,
                         DebugAudioDirectory = env("CHATGPT_DEBUG_AUDIO_DIR"),
-                        MicGateThreshold = double.TryParse(
-                            env("CHATGPT_MIC_GATE_THRESHOLD"),
-                            NumberStyles.Float,
-                            CultureInfo.InvariantCulture,
-                            out var micGate
-                        )
-                            ? micGate
+                        MicGateThreshold = env("CHATGPT_MIC_GATE_THRESHOLD") is { Length: > 0 } micGate
+                            ? double.Parse(micGate, NumberStyles.Float, CultureInfo.InvariantCulture)
                             : new ChatGptConfiguration().MicGateThreshold,
-                        MicGateAttackMs = int.TryParse(env("CHATGPT_MIC_GATE_ATTACK_MS"), out var micAttack)
-                            ? micAttack
+                        MicGateAttackMs = env("CHATGPT_MIC_GATE_ATTACK_MS") is { Length: > 0 } micAttack
+                            ? int.Parse(micAttack, CultureInfo.InvariantCulture)
                             : new ChatGptConfiguration().MicGateAttackMs,
-                        MicGateHoldMs = int.TryParse(env("CHATGPT_MIC_GATE_HOLD_MS"), out var micHold)
-                            ? micHold
+                        MicGateHoldMs = env("CHATGPT_MIC_GATE_HOLD_MS") is { Length: > 0 } micHold
+                            ? int.Parse(micHold, CultureInfo.InvariantCulture)
                             : new ChatGptConfiguration().MicGateHoldMs,
-                        MicGatePrerollMs = int.TryParse(
-                            env("CHATGPT_MIC_GATE_PREROLL_MS"),
-                            out var micPreroll
-                        )
-                            ? micPreroll
+                        MicGatePrerollMs = env("CHATGPT_MIC_GATE_PREROLL_MS") is { Length: > 0 } micPreroll
+                            ? int.Parse(micPreroll, CultureInfo.InvariantCulture)
                             : new ChatGptConfiguration().MicGatePrerollMs,
                     })
                 );
