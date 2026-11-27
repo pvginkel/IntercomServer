@@ -61,11 +61,14 @@ internal sealed class ServerHarness : IAsyncDisposable
     /// the broker and subscribed. <paramref name="settings"/> adds to, or overrides, the
     /// settings the harness gives the server, by their environment variable names.
     /// <paramref name="services"/> replaces registrations of the server's composition, for what
-    /// no setting reaches: the FFmpeg the server runs.
+    /// no setting reaches: the FFmpeg the server runs. With <paramref name="awaitReady"/> false
+    /// it returns once the server's start has run, ready or not, for a server pointed away from
+    /// its broker.
     /// </summary>
     public static async Task<ServerHarness> StartAsync(
         IReadOnlyDictionary<string, string?>? settings = null,
-        Action<IServiceCollection>? services = null
+        Action<IServiceCollection>? services = null,
+        bool awaitReady = true
     )
     {
         var broker = await TestBroker.StartAsync();
@@ -73,7 +76,7 @@ internal sealed class ServerHarness : IAsyncDisposable
 
         try
         {
-            return await StartServerAsync(broker, dataDirectory, settings, services);
+            return await StartServerAsync(broker, dataDirectory, settings, services, awaitReady);
         }
         catch
         {
@@ -87,7 +90,8 @@ internal sealed class ServerHarness : IAsyncDisposable
         TestBroker broker,
         string dataDirectory,
         IReadOnlyDictionary<string, string?>? settings,
-        Action<IServiceCollection>? services
+        Action<IServiceCollection>? services,
+        bool awaitReady
     )
     {
         var (host, healthPort) = await FreePort.StartAsync(async port =>
@@ -128,7 +132,8 @@ internal sealed class ServerHarness : IAsyncDisposable
 
         try
         {
-            await WaitUntilReady(healthPort);
+            if (awaitReady)
+                await WaitUntilReady(healthPort);
 
             var homeAssistant = await broker.ConnectAsync("home-assistant");
 

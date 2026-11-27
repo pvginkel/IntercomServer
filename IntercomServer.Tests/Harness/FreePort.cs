@@ -7,7 +7,8 @@ namespace IntercomServer.Tests.Harness;
 /// TCP ports for what a test starts that cannot bind port 0 and report the port it got: the
 /// in-process broker and the server's health endpoint. A port is free when it is picked, and
 /// another socket can take it before the test binds it, so a start that finds its port taken
-/// picks another (<see cref="StartAsync{T}"/>).
+/// picks another (<see cref="StartAsync{T}"/>). A port picked and left unbound is one nothing
+/// listens on, for a server pointed away from its broker.
 /// </summary>
 internal static class FreePort
 {
@@ -34,7 +35,7 @@ internal static class FreePort
         }
     }
 
-    private static int Pick()
+    public static int Pick()
     {
         // Dual mode on the IPv6 wildcard, so the port is free on every address: the health
         // endpoint listens on all of them.
