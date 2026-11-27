@@ -157,6 +157,44 @@ internal sealed class TestDevice : IAsyncDisposable
     public Task<AudioPacket> NextPacketAsync() =>
         Timeouts.NextAsync(_packets.Reader, $"an audio packet to device {DeviceId}");
 
+    public async Task<List<AudioPacket>> NextPacketsAsync(int count)
+    {
+        var packets = new List<AudioPacket>(count);
+        for (var i = 0; i < count; i++)
+            packets.Add(await NextPacketAsync());
+        return packets;
+    }
+
+    /// <summary>
+    /// The next audio packet, or null when none arrives within <paramref name="quiet"/>: how a
+    /// test sees a sound end.
+    /// </summary>
+    public async Task<AudioPacket?> NextPacketWithinAsync(TimeSpan quiet)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken
+        );
+        timeout.CancelAfter(quiet);
+
+        try
+        {
+            return await _packets.Reader.ReadAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Takes the audio packets that have arrived and not been taken yet, without waiting.</summary>
+    public List<AudioPacket> TakeArrivedPackets()
+    {
+        var packets = new List<AudioPacket>();
+        while (_packets.Reader.TryRead(out var packet))
+            packets.Add(packet);
+        return packets;
+    }
+
     private string Topic(string subtopic) => $"{Prefix}/{DeviceId}/{subtopic}";
 
     private async Task ReceiveAudio(CancellationToken cancellationToken)
@@ -185,7 +223,21 @@ internal sealed class TestDevice : IAsyncDisposable
 }
 
 /// <summary>A command the server published on one of the device's topics, such as <c>set/red_led</c>.</summary>
-internal sealed record DeviceCommand(string Subtopic, string? Payload);
+internal sealed record DeviceCommand(string Subtopic, string? Payload)
+{
+    /// <summary>
+    /// Asserts the command is on <paramref name="subtopic"/>, with a JSON payload equal to
+    /// <paramref name="json"/> whatever its key order and spacing.
+    /// </summary>
+    public void AssertIs(string subtopic, string json)
+    {
+        Assert.Equal(subtopic, Subtopic);
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse(json), JsonNode.Parse(Payload!)),
+            $"Expected {subtopic} {json}, got {Payload}."
+        );
+    }
+}
 
 /// <summary>
 /// One datagram the device's UDP listener received: a 4-byte big-endian packet index, then
@@ -196,4 +248,8 @@ internal sealed record AudioPacket(byte[] Datagram, long ReceivedAt)
     public int Index => BinaryPrimitives.ReadInt32BigEndian(Datagram);
 
     public ReadOnlySpan<byte> Payload => Datagram.AsSpan(4);
+
+    /// <summary>How long after <paramref name="earlier"/> this packet arrived.</summary>
+    public TimeSpan ArrivedAfter(AudioPacket earlier) =>
+        Stopwatch.GetElapsedTime(earlier.ReceivedAt, ReceivedAt);
 }

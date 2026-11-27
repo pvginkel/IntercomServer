@@ -42,6 +42,12 @@ internal sealed class ServerHarness : IAsyncDisposable
     public string DataDirectory { get; }
 
     /// <summary>
+    /// The server's composed services, for a test that drives a part the wire cannot reach: the
+    /// streaming a ChatGPT reply goes through (<see cref="LivePlayback"/>).
+    /// </summary>
+    public IServiceProvider Services => _host.Services;
+
+    /// <summary>
     /// Starts a broker and the server, and returns once the server reports ready: connected to
     /// the broker and subscribed. <paramref name="settings"/> adds to, or overrides, the
     /// settings the harness gives the server, by their environment variable names.
