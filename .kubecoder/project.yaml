@@ -1,13 +1,14 @@
 # Curated automation entry points for IntercomServer.
 # Reference: https://kubecoder.home/help/reference/project-yaml/
 #
-# Every verb names IntercomServer/IntercomServer.csproj and never
-# IntercomServer.sln. The solution also carries IntercomTest, a net9.0-windows
-# WPF project that cannot build on Linux (see that component below), so a
-# solution-wide build is red here by construction. This mirrors CI, which
-# restores and publishes the one csproj as well. IntercomServer.Utils is a
-# ProjectReference of that csproj and so builds through it — it needs no
-# component of its own.
+# Every verb names a project, IntercomServer/IntercomServer.csproj or the suite's
+# IntercomServer.Tests/IntercomServer.Tests.csproj, which references it, and
+# never IntercomServer.sln. The solution also carries IntercomTest, a
+# net9.0-windows WPF project that cannot build on Linux (see that component
+# below), so a solution-wide build is red here by construction. This mirrors
+# CI, which tests, restores and publishes the same projects. IntercomServer.Utils
+# is a ProjectReference of IntercomServer.csproj and so builds through it — it
+# needs no component of its own.
 
 projects:
   root:
@@ -17,10 +18,19 @@ projects:
     # The main build-and-deploy pipeline. AaC/IntercomServer is a second job on
     # this repo; it runs the architecture producer wired up as `lint:` below.
     jenkins: Firmware/IntercomServer
-    setup: cexec dotnet dotnet restore IntercomServer/IntercomServer.csproj
+    # The suite runs the real FFmpeg, and the dotnet sidecar carries none: the
+    # toolchain image grants passwordless sudo for apt-get alone. A sidecar that
+    # restarted on its own comes back without it; this setup puts it back. The
+    # restore of the suite restores the server through its ProjectReference.
+    setup:
+      - cexec dotnet sh -c 'sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg'
+      - cexec dotnet dotnet restore IntercomServer.Tests/IntercomServer.Tests.csproj
     build: cexec dotnet dotnet build IntercomServer/IntercomServer.csproj -c Release
-    # test: unset — the repo has no automated tests. IntercomTest is an
-    # interactive WPF harness, not a suite, and there is no test project.
+    # The xUnit suite: the real server against an MQTT broker in the test
+    # process, UDP on localhost, a temporary data directory and the real FFmpeg.
+    # Jenkinsfile's `Test` stage runs the same command. IntercomTest is an
+    # interactive WPF harness, not part of it.
+    test: cexec dotnet dotnet test IntercomServer.Tests/IntercomServer.Tests.csproj
     #
     # `lint:` is the aac-tools toolchain's architecture validator, the same command
     # Jenkinsfile.architecture runs. No code linter is configured in this repo

@@ -32,4 +32,8 @@
     <ProjectReference Include="..\IntercomServer.Utils\IntercomServer.Utils.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="IntercomServer.Tests" />
+  </ItemGroup>
+
 </Project>

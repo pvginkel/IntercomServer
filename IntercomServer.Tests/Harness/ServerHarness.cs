@@ -1,0 +1,197 @@
+using System.Net;
+using Microsoft.Extensions.Hosting;
+using MQTTnet;
+using MQTTnet.Protocol;
+
+namespace IntercomServer.Tests.Harness;
+
+/// <summary>
+/// The real server, composed as production composes it (<see cref="Program.CreateHostBuilder"/>),
+/// against a broker of its own, with its own ports and data directory. The server reads only the
+/// settings the harness gives it, never the process environment, so tests run side by side and
+/// nothing set where the suite runs reaches them: ChatGPT is off, as no API key is given.
+/// </summary>
+internal sealed class ServerHarness : IAsyncDisposable
+{
+    private static readonly HttpClient Http = new() { Timeout = Timeouts.Observe };
+
+    private readonly IHost _host;
+    private readonly IMqttClient _homeAssistant;
+    private readonly List<TestDevice> _devices = [];
+
+    private ServerHarness(
+        TestBroker broker,
+        IHost host,
+        int healthPort,
+        string dataDirectory,
+        IMqttClient homeAssistant
+    )
+    {
+        Broker = broker;
+        _host = host;
+        HealthPort = healthPort;
+        DataDirectory = dataDirectory;
+        _homeAssistant = homeAssistant;
+    }
+
+    public TestBroker Broker { get; }
+
+    public int HealthPort { get; }
+
+    /// <summary>The server's <c>DATA_DIR</c>, a temporary directory removed with the harness.</summary>
+    public string DataDirectory { get; }
+
+    /// <summary>
+    /// Starts a broker and the server, and returns once the server reports ready: connected to
+    /// the broker and subscribed. <paramref name="settings"/> adds to, or overrides, the
+    /// settings the harness gives the server, by their environment variable names.
+    /// </summary>
+    public static async Task<ServerHarness> StartAsync(
+        IReadOnlyDictionary<string, string?>? settings = null
+    )
+    {
+        var broker = await TestBroker.StartAsync();
+        var dataDirectory = Directory.CreateTempSubdirectory("intercom-server-tests-").FullName;
+
+        try
+        {
+            return await StartServerAsync(broker, dataDirectory, settings);
+        }
+        catch
+        {
+            await broker.DisposeAsync();
+            Directory.Delete(dataDirectory, recursive: true);
+            throw;
+        }
+    }
+
+    private static async Task<ServerHarness> StartServerAsync(
+        TestBroker broker,
+        string dataDirectory,
+        IReadOnlyDictionary<string, string?>? settings
+    )
+    {
+        var (host, healthPort) = await FreePort.StartAsync(async port =>
+        {
+            var serverSettings = new Dictionary<string, string?>
+            {
+                ["MQTT_HOST"] = IPAddress.Loopback.ToString(),
+                ["MQTT_PORT"] = broker.Port.ToString(),
+                ["HEALTH_PORT"] = port.ToString(),
+                // Port 0: the UDP audio server binds whichever port is free.
+                ["AUDIO_PORT"] = "0",
+                ["AUDIO_HOST"] = IPAddress.Loopback.ToString(),
+                ["DATA_DIR"] = dataDirectory,
+            };
+            foreach (var (name, value) in settings ?? new Dictionary<string, string?>())
+                serverSettings[name] = value;
+
+            var host = Program.CreateHostBuilder(name => serverSettings.GetValueOrDefault(name)).Build();
+            try
+            {
+                using var timeout = new CancellationTokenSource(Timeouts.Observe);
+                await host.StartAsync(timeout.Token);
+            }
+            catch
+            {
+                await ((IAsyncDisposable)host).DisposeAsync();
+                throw;
+            }
+
+            return (host, port);
+        });
+
+        try
+        {
+            await WaitUntilReady(healthPort);
+
+            var homeAssistant = await broker.ConnectAsync("home-assistant");
+
+            return new ServerHarness(broker, host, healthPort, dataDirectory, homeAssistant);
+        }
+        catch
+        {
+            await host.StopAsync();
+            await ((IAsyncDisposable)host).DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>Connects a device under <paramref name="prefix"/>; it publishes nothing until the test says so.</summary>
+    public async Task<TestDevice> AddDeviceAsync(
+        string deviceId,
+        string prefix = TestDevice.IntercomPrefix
+    )
+    {
+        var device = await TestDevice.ConnectAsync(Broker, prefix, deviceId);
+        _devices.Add(device);
+        return device;
+    }
+
+    /// <summary>
+    /// Publishes as Home Assistant does, at QoS 1, so the server receives it after everything
+    /// published before it (see <see cref="TestDevice.PublishAsync"/>).
+    /// </summary>
+    public async Task PublishAsync(string topic, string payload)
+    {
+        var message = new MqttApplicationMessageBuilder()
+            .WithTopic(topic)
+            .WithPayload(payload)
+            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+            .Build();
+
+        using var timeout = new CancellationTokenSource(Timeouts.Observe);
+        await _homeAssistant.PublishAsync(message, timeout.Token);
+    }
+
+    public Task RingDoorbellAsync() => PublishAsync("intercom/server/set/ring_doorbell", "true");
+
+    /// <summary>Asks the server's health endpoint, as Kubernetes' probes do.</summary>
+    public async Task<(HttpStatusCode Status, string Body)> GetHealthAsync(string path)
+    {
+        using var response = await Http.GetAsync($"http://{IPAddress.Loopback}:{HealthPort}{path}");
+        return (response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    private static async Task WaitUntilReady(int healthPort)
+    {
+        using var timeout = new CancellationTokenSource(Timeouts.Observe);
+        var url = $"http://{IPAddress.Loopback}:{healthPort}/readyz";
+
+        try
+        {
+            while (true)
+            {
+                using (var response = await Http.GetAsync(url, timeout.Token))
+                {
+                    if (response.StatusCode == HttpStatusCode.OK)
+                        return;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(50), timeout.Token);
+            }
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Waited {Timeouts.Observe.TotalSeconds:0} s for the server to report ready on {url}."
+            );
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var device in _devices)
+            await device.DisposeAsync();
+
+        await _homeAssistant.DisconnectAsync();
+        _homeAssistant.Dispose();
+
+        await _host.StopAsync();
+        await ((IAsyncDisposable)_host).DisposeAsync();
+
+        await Broker.DisposeAsync();
+
+        Directory.Delete(DataDirectory, recursive: true);
+    }
+}

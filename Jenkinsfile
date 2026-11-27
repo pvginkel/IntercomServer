@@ -1,5 +1,5 @@
-// Publishes IntercomServer with the .NET 9 SDK, builds the intercom-server image over that output,
-// and pins it into IntercomDeploy, which Argo CD syncs to prd.
+// Tests IntercomServer, publishes it with the .NET 9 SDK, builds the intercom-server image over that
+// output, and pins it into IntercomDeploy, which Argo CD syncs to prd.
 //
 // Controller config:
 //   - Job: Firmware/IntercomServer
@@ -32,6 +32,17 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+            }
+        }
+
+        stage('Test') {
+            steps {
+                container('dotnet-sdk') {
+                    // The suite runs the real FFmpeg, which the SDK image lacks. The container
+                    // runs as root and carries no sudo.
+                    sh 'apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg'
+                    sh 'dotnet test IntercomServer.Tests/IntercomServer.Tests.csproj'
+                }
             }
         }
 
