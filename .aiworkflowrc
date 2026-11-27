@@ -1,0 +1,23 @@
+# What the dev pipeline reads about this project.
+# Schema: ${CLAUDE_PLUGIN_ROOT}/docs/project-contract.md
+spec_repo = "../IntercomServerSpecs"
+design_philosophy = "docs/change-discipline.md"
+
+[test_phase]
+# The suites, then the push, which is the production deploy: there is one
+# deployment and no dev instance. The doc follows the roll and reads the new
+# pod's start through Argo CD.
+strategy = "docs/slice-test-plan.md"
+
+[doc_phase]
+plan = "docs/slice-doc-plan.md"
+
+[push]
+enabled = true
+# The push is the production deploy: Jenkins Firmware/IntercomServer builds,
+# pins the image into IntercomDeploy, and Argo CD rolls intercom-prd.
+deploys = true
+
+# No [devlock]: with no dev instance, nothing contends over one.
+# No [migrations]: there is no database. What the server keeps is files on the
+# data volume.
