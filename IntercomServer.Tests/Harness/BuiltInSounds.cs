@@ -12,6 +12,8 @@ internal static class BuiltInSounds
 
     public static readonly TimeSpan RingLength = TimeSpan.FromSeconds(6.264);
 
+    public static readonly TimeSpan RejectedLength = TimeSpan.FromSeconds(1.646);
+
     public static readonly TimeSpan Margin = TimeSpan.FromSeconds(0.5);
 
     /// <summary>Bytes a second at mono 16 kHz 16-bit, the format every device in production plays.</summary>

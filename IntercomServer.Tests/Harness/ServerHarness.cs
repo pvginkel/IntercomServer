@@ -1,4 +1,6 @@
 using System.Net;
+using IntercomServer.Utils;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MQTTnet;
 using MQTTnet.Protocol;
@@ -46,6 +48,13 @@ internal sealed class ServerHarness : IAsyncDisposable
     /// streaming a ChatGPT reply goes through (<see cref="LivePlayback"/>).
     /// </summary>
     public IServiceProvider Services => _host.Services;
+
+    /// <summary>
+    /// The endpoint the server points a device's microphone at for a ChatGPT conversation: the
+    /// harness's <c>AUDIO_HOST</c>, and the port the server's UDP audio server bound.
+    /// </summary>
+    public string AudioEndpoint =>
+        $"{IPAddress.Loopback}:{Services.GetRequiredService<UdpAudioServer>().LocalEndPoint.Port}";
 
     /// <summary>
     /// Starts a broker and the server, and returns once the server reports ready: connected to

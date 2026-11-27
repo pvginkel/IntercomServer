@@ -19,6 +19,9 @@ internal sealed class TestDevice : IAsyncDisposable
 {
     public const string IntercomPrefix = "intercom/client";
 
+    // How long nothing arrives before NextSoundAsync takes a sound to have ended: fifty chunks' time.
+    private static readonly TimeSpan SoundEnded = TimeSpan.FromSeconds(1);
+
     private readonly IMqttClient _mqtt;
     private readonly UdpClient _udp;
     private readonly Channel<DeviceCommand> _commands = Channel.CreateUnbounded<DeviceCommand>();
@@ -41,6 +44,12 @@ internal sealed class TestDevice : IAsyncDisposable
 
     /// <summary>The device's audio endpoint, a UDP listener on loopback.</summary>
     public IPEndPoint AudioEndpoint => (IPEndPoint)_udp.Client.LocalEndPoint!;
+
+    /// <summary>
+    /// The <c>endpoint</c> the default configuration advertises, the <c>host:port</c> the server
+    /// passes to the device's peers in a call.
+    /// </summary>
+    public string Endpoint => $"{AudioEndpoint.Address}:{AudioEndpoint.Port}";
 
     /// <summary>How many audio packets the device has received so far.</summary>
     public int ReceivedPacketCount => _packets.Reader.Count;
@@ -97,7 +106,7 @@ internal sealed class TestDevice : IAsyncDisposable
                 ["name"] = DeviceId,
                 ["firmware_version"] = "0.0.0",
             },
-            ["endpoint"] = $"{AudioEndpoint.Address}:{AudioEndpoint.Port}",
+            ["endpoint"] = Endpoint,
         };
 
     public static JsonObject Mono16Khz16Bit() =>
@@ -154,6 +163,23 @@ internal sealed class TestDevice : IAsyncDisposable
     public Task<DeviceCommand> NextCommandAsync() =>
         Timeouts.NextAsync(_commands.Reader, $"a command to device {DeviceId}");
 
+    /// <summary>
+    /// Asserts the next commands the device receives are <paramref name="expected"/>, in this
+    /// order: the server publishes them one after another, and the broker delivers a device's
+    /// commands in the order they were published.
+    /// </summary>
+    public async Task ExpectCommandsAsync(params ExpectedCommand[] expected)
+    {
+        for (var i = 0; i < expected.Length; i++)
+        {
+            var command = await NextCommandAsync();
+            Assert.True(
+                expected[i].Matches(command),
+                $"Command {i + 1} of {expected.Length} to device {DeviceId}: expected {expected[i]}, got {command.Subtopic} {command.Payload}."
+            );
+        }
+    }
+
     public Task<AudioPacket> NextPacketAsync() =>
         Timeouts.NextAsync(_packets.Reader, $"an audio packet to device {DeviceId}");
 
@@ -184,6 +210,25 @@ internal sealed class TestDevice : IAsyncDisposable
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// The packets of the next sound: from the next packet until none arrives for a second, or
+    /// until more than <paramref name="longest"/> of audio has come, so a sound that plays on is
+    /// returned cut short rather than waited out.
+    /// </summary>
+    public async Task<List<AudioPacket>> NextSoundAsync(TimeSpan longest)
+    {
+        var packets = new List<AudioPacket> { await NextPacketAsync() };
+        var bytes = packets[0].Payload.Length;
+
+        while (bytes <= BuiltInSounds.Bytes(longest) && await NextPacketWithinAsync(SoundEnded) is { } packet)
+        {
+            packets.Add(packet);
+            bytes += packet.Payload.Length;
+        }
+
+        return packets;
     }
 
     /// <summary>Takes the audio packets that have arrived and not been taken yet, without waiting.</summary>
@@ -248,6 +293,15 @@ internal sealed record AudioPacket(byte[] Datagram, long ReceivedAt)
     public int Index => BinaryPrimitives.ReadInt32BigEndian(Datagram);
 
     public ReadOnlySpan<byte> Payload => Datagram.AsSpan(4);
+
+    /// <summary>
+    /// Whether two runs of packets carry the same audio, payload by payload, as one sound sent to
+    /// two devices does.
+    /// </summary>
+    public static bool SameAudio(IEnumerable<AudioPacket> first, IEnumerable<AudioPacket> second) =>
+        first
+            .Select(packet => Convert.ToHexString(packet.Payload))
+            .SequenceEqual(second.Select(packet => Convert.ToHexString(packet.Payload)));
 
     /// <summary>How long after <paramref name="earlier"/> this packet arrived.</summary>
     public TimeSpan ArrivedAfter(AudioPacket earlier) =>
