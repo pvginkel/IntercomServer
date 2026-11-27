@@ -2,11 +2,20 @@
 # Reference: https://kubecoder.home/help/reference/config-yaml/
 #
 # Keys not spelled out here take their documented defaults — in particular
-# `cwd:`, which absent means this repo's own directory, and `repos:`, since
-# nothing is built against a sibling checkout.
+# `cwd:`, which absent means this repo's own directory.
 
 capabilities:
   github: rw
+
+# Sibling checkouts, each at /work/<repo>. Nothing builds against them: they are
+# where the dev pipeline's work lands beside this repo.
+repos:
+  # The spec repository, `.aiworkflowrc`'s `spec_repo`: slices and their run
+  # records. Every profile of the pipeline's preflight needs it checked out.
+  - url: https://github.com/pvginkel/IntercomServerSpecs
+  # The deploy repo: the chart, its prd config (the image pin Jenkins writes)
+  # and its Terraform. Slices change it beside this repo.
+  - url: https://github.com/pvginkel/IntercomDeploy
 
 tools:
   # The .NET 8 and 9 SDKs side by side. Everything here targets net9.0 and there
@@ -14,8 +23,12 @@ tools:
   # limit and the persistent `.nuget` package cache are properties of the
   # catalog entry, so they are deliberately not restated here.
   - use: dotnet
-  # arch-validate, the architecture artifact's lint gate.
+  # arch-validate, the architecture artifact's lint gate, and IntercomDeploy's
+  # chart-deps and gen-architecture.
   - use: aac-tools
+  # helm and terraform: IntercomDeploy's test and lint verbs, which slices that
+  # change the deploy repo are gated on.
+  - use: iac
 
 # The repo ships a Dockerfile: a runtime image laid over the `publish/` output
 # of `dotnet publish`. Jenkins builds it with helmCharts.kaniko2; this opt-in is
