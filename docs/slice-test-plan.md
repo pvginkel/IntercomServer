@@ -82,8 +82,10 @@ BRANCH=slice-<NNN>; SHA=$(git rev-parse HEAD)    # <NNN>: the slice's number
 git rev-parse origin/main; git rev-parse -q --verify "origin/$BRANCH"
 ```
 
-- **`$SHA` is `origin/main`**: IntercomDeploy has nothing of the slice left to push. Go on to this
-  repo.
+- **`$SHA` is `origin/main`**: IntercomDeploy has nothing of the slice left to push. Where
+  `origin/$BRANCH` still stands, a pass landed `main` and ended before it had followed the roll:
+  run the landing block's last three lines first, from `track_build.py` on, so that the roll is
+  confirmed and the hook's `Apply complete!` line read. Then go on to this repo.
 - **The branch is missing, or its head is not `$SHA`**: the plan to read is still to come. Push the
   branch, `git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"`, and stop with `blocked`,
   naming the action for Pilot's Ansible work item with `$SHA` in full: "Run the plan Job of Ansible
