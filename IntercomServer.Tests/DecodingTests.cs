@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using IntercomServer.Tests.Harness;
+using IntercomServer.Utils.Audio;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace IntercomServer.Tests;
@@ -8,7 +9,7 @@ namespace IntercomServer.Tests;
 /// FFmpeg decodes the built-in sounds once, when the server starts, into mono 16 kHz 16-bit,
 /// and a device is sent exactly what it decoded. A server that cannot decode does not start.
 /// These run the FFmpeg on the PATH, whose version is not the one production runs, so they read
-/// a decoded sound's length and level, never bytes one FFmpeg makes and another may not.
+/// a built-in sound's length and level, never bytes one FFmpeg makes and another may not.
 /// </summary>
 public sealed class DecodingTests
 {
@@ -42,6 +43,43 @@ public sealed class DecodingTests
         for (var i = 0; i < pcm.Length; i += 2)
             peak = Math.Max(peak, Math.Abs((int)BinaryPrimitives.ReadInt16LittleEndian(pcm.AsSpan(i))));
         Assert.True(peak > short.MaxValue / 10, $"{fileName} decoded to near silence: its peak is {peak}.");
+    }
+
+    [Fact]
+    public async Task The_server_decodes_into_signed_16_bit_little_endian_samples()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var format = Constants.AudioFormat;
+        short[] samples =
+        [
+            .. Enumerable
+                .Range(0, format.SampleRate / 2)
+                .Select(i => (short)(16000 * Math.Sin(2 * Math.PI * 440 * i / format.SampleRate))),
+            short.MinValue,
+            -256,
+            -1,
+            0,
+            1,
+            255,
+            256,
+            short.MaxValue,
+        ];
+
+        // A WAV already in the format decoded into passes through every FFmpeg unchanged, so the
+        // decode is the samples themselves in the encoding the server sends.
+        var pcm = await harness
+            .Services.GetRequiredService<AudioDecoder>()
+            .DecodeAsync(
+                "a WAV",
+                new MemoryStream(Wav(samples, format)),
+                format,
+                TestContext.Current.CancellationToken
+            );
+
+        var expected = new byte[samples.Length * 2];
+        for (var i = 0; i < samples.Length; i++)
+            BinaryPrimitives.WriteInt16LittleEndian(expected.AsSpan(i * 2), samples[i]);
+        Assert.Equal(expected, pcm);
     }
 
     [Fact]
@@ -94,6 +132,28 @@ public sealed class DecodingTests
         );
 
         Assert.StartsWith("FFmpeg could not decode not-audio: it exited with code ", error.Message);
+    }
+
+    private static byte[] Wav(short[] samples, AudioFormat format)
+    {
+        var wav = new MemoryStream();
+        using var writer = new BinaryWriter(wav);
+        writer.Write("RIFF"u8);
+        writer.Write(36 + samples.Length * 2);
+        writer.Write("WAVEfmt "u8);
+        writer.Write(16);
+        writer.Write((short)1); // PCM
+        writer.Write((short)format.ChannelCount);
+        writer.Write(format.SampleRate);
+        writer.Write(format.BytesPerSecond);
+        writer.Write((short)(format.ChannelCount * 2));
+        writer.Write((short)16);
+        writer.Write("data"u8);
+        writer.Write(samples.Length * 2);
+        foreach (var sample in samples)
+            writer.Write(sample);
+        writer.Flush();
+        return wav.ToArray();
     }
 
     private static byte[] Decoded(ServerHarness harness, string fileName)
