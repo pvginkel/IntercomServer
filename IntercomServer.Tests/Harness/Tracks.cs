@@ -49,11 +49,12 @@ internal static class Tracks
     public static Task<byte[]> VideoAsync() =>
         MadeAsync("mp4", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=1", "-c:v", "mpeg4");
 
-    /// <summary><paramref name="length"/> random bytes, which no format reads as audio.</summary>
-    public static byte[] Noise(int length = 4096)
+    /// <summary>4,096 bytes of noise, the same on every run, which ffprobe cannot read.</summary>
+    public static byte[] Noise()
     {
-        var noise = new byte[length];
-        Random.Shared.NextBytes(noise);
+        // A fixed seed: fresh random bytes are now and then a file ffprobe reads, as an lrc subtitle.
+        var noise = new byte[4096];
+        new Random(0).NextBytes(noise);
         return noise;
     }
 
