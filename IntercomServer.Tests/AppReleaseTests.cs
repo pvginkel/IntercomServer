@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Threading.Channels;
 using IntercomServer.Tests.Harness;
 
 namespace IntercomServer.Tests;
@@ -53,6 +54,28 @@ public sealed class AppReleaseTests
                 TestContext.Current.CancellationToken
             )
         );
+    }
+
+    [Fact]
+    public async Task A_release_is_written_to_a_temporary_file_in_the_folder_and_renamed_into_place()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        Directory.CreateDirectory(harness.UpdatesDirectory());
+        var arrivals = Channel.CreateUnbounded<FileSystemEventArgs>();
+        using var watcher = new FileSystemWatcher(harness.UpdatesDirectory()) { NotifyFilter = NotifyFilters.FileName };
+        watcher.Created += (_, e) => arrivals.Writer.TryWrite(e);
+        watcher.Renamed += (_, e) => arrivals.Writer.TryWrite(e);
+        watcher.EnableRaisingEvents = true;
+
+        using var published = await harness.PublishAsync(harness.Issuer.TokenWithRoles("pipeline"), "7", AppReleases.Apk());
+        FileSystemEventArgs arrival;
+        do
+            arrival = await Timeouts.NextAsync(arrivals.Reader, "7.apk to appear in the folder");
+        while (arrival.Name != "7.apk");
+
+        Assert.Equal(HttpStatusCode.Created, published.StatusCode);
+        var renamed = Assert.IsType<RenamedEventArgs>(arrival);
+        Assert.Matches(@"^\..+\.tmp$", renamed.OldName);
     }
 
     [Fact]
