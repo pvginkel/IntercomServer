@@ -6,8 +6,8 @@ namespace IntercomServer.Tests;
 /// How the server learns its devices: from the <c>configuration</c> and <c>state</c> each one
 /// publishes under <c>intercom/client</c>, and nowhere else. A device is reached, here by the
 /// doorbell, while its latest state is online and enabled. A check that a device got nothing
-/// stands on a control device, which the same sound reached: had the device been reached too,
-/// its packets would have gone out beside the control's.
+/// stands on a control device that the same sound, or a later one, reached: had the device
+/// been reached, its packets would have gone out beside or before the control's.
 /// </summary>
 public sealed class DiscoveryTests
 {
@@ -93,7 +93,7 @@ public sealed class DiscoveryTests
     }
 
     [Fact]
-    public async Task An_empty_state_removes_the_device()
+    public async Task An_empty_state_removes_the_device_and_its_configuration_goes_with_it()
     {
         await using var harness = await ServerHarness.StartAsync();
         var control = await harness.AddDeviceAsync("0x0a0001");
@@ -105,6 +105,19 @@ public sealed class DiscoveryTests
         await harness.RingDoorbellAsync();
 
         await control.NextPacketsAsync(Packets);
+        Assert.Equal(0, device.ReceivedPacketCount);
+
+        // Back with its state alone, the device has no configuration, and the doorbell sends it
+        // nothing. The witness's packets are that doorbell's or the next one's, which the
+        // device, offline by then, is out of: a packet to the device went out before them.
+        var witness = await harness.AddDeviceAsync("0x0a0003");
+        await witness.ComeOnlineAsync();
+        await device.PublishStateAsync();
+        await harness.RingDoorbellAsync();
+        await device.PublishStateAsync(online: false);
+        await harness.RingDoorbellAsync();
+
+        await witness.NextPacketsAsync(Packets);
         Assert.Equal(0, device.ReceivedPacketCount);
 
         await device.ComeOnlineAsync();
