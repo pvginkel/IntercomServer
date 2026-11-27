@@ -14,12 +14,15 @@ whole diff, in one pass.
    - [`CHATGPT_MCP.md`](CHATGPT_MCP.md), the ChatGPT bridge: how a conversation starts and ends,
      its environment variables, the prompt placeholders, the MCP server configuration and the
      memory store. A slice that changes any of them updates it.
+   - [`web-host.md`](web-host.md), the server's HTTP side: the web host's port and probes, the
+     Keycloak sign-in and its roles, the ambient tracks on disk and their API, the app's update
+     channel, and their environment variables. A slice that changes any of them updates it.
    - The three procedure docs, [`change-discipline.md`](change-discipline.md),
      [`slice-test-plan.md`](slice-test-plan.md) and this one. A slice that changed how the repo is
      changed, verified or documented updates the matching doc: a new test-suite convention goes in
      the change discipline's testing section, and a new start line or check in the test plan.
-   - A part of the server worth a page of its own (a new subsystem, such as a web host or the
-     ambient player) gets a topic doc here, named for what it covers.
+   - A part of the server worth a page of its own (a new subsystem, such as the ambient player)
+     gets a topic doc here, named for what it covers.
 2. **The architecture model, `docs/architecture/architecture.yaml`**, is hand-authored here. A slice
    that added or removed an external edge (an interface, a dependency, an MQTT namespace) and did not
    update it in its code phases updates it now, keeping the existing ids stable.
@@ -35,10 +38,11 @@ whole diff, in one pass.
 5. **Another repo the slice created or changed** follows its own slice doc plan where it has one,
    else its `README.md`.
 
-**Consumers in other repos are named, not edited.** The device firmware, the ToiletAutomation
-design and Home Assistant's automations read this server's MQTT and UDP contracts. Where the slice
-changed one, or the implementation diverged from a design doc another repo keeps, the close-out says
-what changed and which doc it touches; this phase never edits that repo.
+**Consumers in other repos are named, not edited.** The device firmware, the ToiletAutomation design
+and Home Assistant's automations read this server's MQTT and UDP contracts, and the app, Jenkins'
+publish and the same design read its HTTP API. Where the slice changed one, or the implementation
+diverged from a design doc another repo keeps, the close-out says what changed and which doc it
+touches; this phase never edits that repo.
 
 There is no README and no `CLAUDE.md` in this repo, and the doc phase writes neither unless the
 slice asked for one.

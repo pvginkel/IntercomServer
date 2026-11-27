@@ -32,7 +32,7 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `OPENAI_API_KEY` | **yes** | — | OpenAI API key. When empty the whole feature is disabled. |
-| `CHATGPT_MODEL` | no | `gpt-realtime` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
+| `CHATGPT_MODEL` | no | `gpt-realtime-2` | Realtime model name (e.g. `gpt-realtime`, `gpt-realtime-2`). |
 | `CHATGPT_VOICE` | no | `marin` | Voice: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer`, `verse`. |
 | `CHATGPT_WEB_SEARCH_MODEL` | no | `gpt-5.5` | Model used by the built-in `web_search` tool (see below). |
 | `CHATGPT_INSTRUCTIONS_FILE` | no | — | Path to a file containing the system prompt; read at startup. When unset, a built‑in persona is used. May contain the `{NOW}`, `{MEMORIES}` and `{DEVICE_NAME}` placeholders (see below). |
@@ -40,7 +40,7 @@ from environment variables (same style as the existing `MQTT_*` settings):
 | `CHATGPT_CLOSE_OUT_TIMEOUT_SECONDS` | no | `30` | Hard cap on the background close‑out turn (see *Close‑out turn* below). Generous by default because close‑out may make MCP tool calls (e.g. sending an email). Must be greater than zero. |
 | `CHATGPT_LOCALE` | no | host culture | Culture used to format substituted values such as `{NOW}` (e.g. `nl-NL`). |
 | `MCP_CONFIG_FILE` | no | `mcpservers.json` | Path to the MCP server list (see below). |
-| `DATA_DIR` | no | `data` | Root folder for the server's persistent data. The model's memories live in a `memories/` sub-folder (see *Memory* below). |
+| `DATA_DIR` | no | `data` | Root folder for the server's persistent data, the ambient tracks and the app's releases among it ([`web-host.md`](web-host.md)). The model's memories live in a `memories/` sub-folder (see *Memory* below). |
 | `CHATGPT_DEBUG_AUDIO_DIR` | no | — | Debugging only: when set, the audio received from OpenAI is also written to WAV files in this directory (the raw 24 kHz stream and the stream sent to the device, at its rate). |
 
 The system prompt may include the placeholder **`{NOW}`**, which is replaced at the start of

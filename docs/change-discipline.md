@@ -3,13 +3,13 @@
 The rules every code change in this repo obeys. This is the doc `.aiworkflowrc` names as
 `design_philosophy`: it is handed to every `code-writer`, `code-reviewer`, `plan-writer` and
 `plan-reviewer` the pipeline dispatches, and a reviewer cites it when sending work back. It states
-rules; what the server does is in its code, in [`devices.md`](devices.md) and
-[`CHATGPT_MCP.md`](CHATGPT_MCP.md), and the architecture model in
+rules; what the server does is in its code, in [`devices.md`](devices.md),
+[`web-host.md`](web-host.md) and [`CHATGPT_MCP.md`](CHATGPT_MCP.md), and the architecture model in
 [`architecture/architecture.yaml`](architecture/architecture.yaml).
 
 ## The wire contracts belong to the devices too
 
-Nothing outside this repo imports its code, but three surfaces are read by systems this repo does
+Nothing outside this repo imports its code, but four surfaces are read by systems this repo does
 not own:
 
 - **MQTT**: the `<prefix>/<id>/…` topics the devices publish under each prefix in
@@ -22,6 +22,11 @@ not own:
   20 ms chunks split past 1468 bytes, each datagram a 4-byte big-endian packet index from the
   device's own counter and its payload (`AudioSender.cs`), paced in real time because the devices'
   jitter buffers are small (`AudioStreaming.cs`). [`devices.md`](devices.md) has the details.
+- **HTTP**: the web host's routes, which the app and Jenkins call: `/api/ambient-tracks` and
+  `/api/app-releases` behind a Keycloak bearer token and a client role (`TrackEndpoints.cs`,
+  `AppReleaseEndpoints.cs`, `SignIn.cs`), and `/updates`, MyDownloadsServer's two-call update
+  contract, with none. Paths, form fields and their order, JSON shapes and status codes are shared
+  verbatim with them. [`web-host.md`](web-host.md) has the details.
 - **The deploy**: pvginkel/IntercomDeploy's chart sets the environment variables, prompt files and
   secret names production runs with. A setting the server has no default for, new or renamed,
   changes the chart in the same slice, or the pod crash-loops on the next roll:
@@ -37,10 +42,10 @@ not own:
   `main` with no plan Job.
 
 Inside this repo, **fix the callers**: no shim, adapter or second code path that keeps an old shape
-alive. A change to MQTT or UDP that the firmware must follow is a breaking change to a consumer
-nobody here can update in the same commit: make it only where the slice's design says so, and name
-it in the close-out so the operator can schedule the firmware side. The firmware is never waited on,
-watched or ordered from here.
+alive. A change to MQTT or UDP that the firmware must follow, or to the HTTP API that the app must
+follow, is a breaking change to a consumer nobody here can update in the same commit: make it only
+where the slice's design says so, and name it in the close-out so the operator can schedule the
+other side. The firmware is never waited on, watched or ordered from here.
 
 ## Devices by their id
 
@@ -62,10 +67,10 @@ Configuration is checked once, at startup, and a bad value stops the process
 (`ChatGptConfiguration.Validate` is the pattern).
 
 **Boundary validation is the exception, and it is the point.** Validate what crosses in from
-outside: MQTT payloads, UDP datagrams, environment variables, files on the data volume, OpenAI's and
-the MCP servers' answers. A device that goes offline or sends an unknown action is an expected
-condition: the MQTT handler logs it and carries on with the next message, as `Server.cs` does,
-rather than taking down the connection.
+outside: MQTT payloads, UDP datagrams, HTTP requests, environment variables, files on the data
+volume, OpenAI's and the MCP servers' answers. A device that goes offline or sends an unknown action
+is an expected condition: the MQTT handler logs it and carries on with the next message, as
+`Server.cs` does, rather than taking down the connection.
 
 ## Testability is critical
 
@@ -79,14 +84,18 @@ The ChatGPT bridge's conversation with OpenAI is the one part not covered.
 
 **The suite** is `IntercomServer.Tests`, on xUnit v3. `kc project test` runs it in the `dotnet`
 sidecar, with the FFmpeg `kc project setup` installs there, and the Jenkins `Test` stage installs
-FFmpeg and runs it before the image is built, so a red suite never deploys. A test starts the real server, composed as production composes
-it, with `await using var harness = await ServerHarness.StartAsync(settings)`: a broker, ports and
+FFmpeg and runs it before the image is built, so a red suite never deploys. A test starts the real
+server, composed as production composes it, with
+`await using var harness = await ServerHarness.StartAsync(settings)`: a broker, a Keycloak realm
+(`ServerHarness.Issuer`, which signs the tests' tokens: `Issuer.TokenWithRoles("user")`), ports and
 data directory of its own, and only the settings the harness gives it, which `settings` adds to or
 overrides by their environment variable names, so ChatGPT is off. It drives the server as the
-devices and Home Assistant do, through the parts in `IntercomServer.Tests/Harness/`. Test classes
-run in parallel, and a timing pin joins `PacingTests`, a collection that runs alone. Nothing marks
-a message handled, so a check that something was *not* sent stands on a later positive
-observation: a control device the same sound reached, or `ServerHarness.AssertSentNoCommandAsync`.
+devices, Home Assistant, the app and Jenkins do, through the parts in
+`IntercomServer.Tests/Harness/`: HTTP through `ServerHarness.SendAsync`, on the port the web host
+bound. Test classes run in parallel, and a timing pin joins `PacingTests`, a collection that runs
+alone. Nothing marks a message handled, so a check that something was *not* sent stands on a later
+positive observation: a control device the same sound reached, or
+`ServerHarness.AssertSentNoCommandAsync`.
 
 ## Build the project, never the solution
 
@@ -110,8 +119,10 @@ federation.
   structured placeholders (`{Device}`), messages as English sentences.
 - **Configuration**: environment variables parsed in `Program.cs` onto plain `*Configuration`
   classes with `init` properties; no `IConfiguration` or `IOptions`. A default lives in one place.
-- **Hosting**: Microsoft.Extensions.Hosting, singletons injected through primary constructors,
-  `internal` types, and hosted services started in registration order (the health endpoint first).
+- **Hosting**: Microsoft.Extensions.Hosting with ASP.NET Core's web host inside it, singletons
+  injected through primary constructors, `internal` types, and hosted services started in
+  registration order (the web host first, so the probes answer from the start). The web host reads
+  no configuration source: Kestrel's port and every framework option are set in code.
 - **Async**: `async`/`await` with a `CancellationToken` through every long-running path.
 - **Comments**: XML doc comments on configuration classes and public types; inline comments say why,
   never what.

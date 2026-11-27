@@ -45,9 +45,10 @@ applicationServices:
     label: Intercom HTTP API
     summary: >-
       HTTP API on the server's web host: /api, every call behind a Keycloak
-      bearer token and a client role of intercom-server (pipeline publishes app
-      releases), and /updates?action=version|download, unauthenticated, the
-      app's update channel.
+      bearer token and a client role of intercom-server (user keeps the ambient
+      tracks under /api/ambient-tracks, pipeline publishes app releases), and
+      /updates?action=version|download, unauthenticated, the app's update
+      channel.
     introduced: 2026-11-27
     lifecycle: active
 
