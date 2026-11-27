@@ -77,6 +77,17 @@ internal partial class Program
                 : new DataConfiguration().Directory,
         };
 
+        var trackConfiguration = new TrackConfiguration
+        {
+            MaxDuration = env("TRACK_MAX_SECONDS") is { Length: > 0 } maxSeconds
+                ? TimeSpan.FromSeconds(int.Parse(maxSeconds, CultureInfo.InvariantCulture))
+                : new TrackConfiguration().MaxDuration,
+            MaxBytes = env("TRACK_MAX_BYTES") is { Length: > 0 } maxBytes
+                ? long.Parse(maxBytes, CultureInfo.InvariantCulture)
+                : new TrackConfiguration().MaxBytes,
+        };
+        trackConfiguration.Validate();
+
         var builder = new HostBuilder()
             // The framework logs through Serilog too, its warnings and errors, and the address the
             // web host listens on. AddSerilog would add a rule of its own letting every level
@@ -90,7 +101,7 @@ internal partial class Program
             // ConfigureWebHost registers the web host's hosted service, and hosted services start in
             // registration order: the probes are answered from the start, while Service.StartAsync is
             // still dialing the MQTT broker and discovering MCP servers (which can block). The sounds
-            // are decoded before Service connects, so nothing plays before they are.
+            // are decoded, and ffprobe found, before Service connects, so nothing plays before they are.
             .ConfigureWebHost(
                 web =>
                     web.UseKestrel(kestrel => kestrel.ListenAnyIP(webHostConfiguration.Port))
@@ -116,6 +127,7 @@ internal partial class Program
             (context, services) =>
             {
                 services.AddHostedService(p => p.GetRequiredService<SoundLibrary>());
+                services.AddHostedService(p => p.GetRequiredService<TrackStore>());
                 services.AddHostedService<Service>();
                 services.AddSingleton(
                     new ServerConfiguration
@@ -202,6 +214,9 @@ internal partial class Program
                 );
                 services.AddSingleton(dataConfiguration);
                 services.AddSingleton<AppReleaseStore>();
+                services.AddSingleton(trackConfiguration);
+                services.AddSingleton(new AudioProbe("ffprobe"));
+                services.AddSingleton<TrackStore>();
                 services.AddSingleton<Server>();
                 services.AddSingleton<DeviceManager>();
                 services.AddSingleton<StateManager>();

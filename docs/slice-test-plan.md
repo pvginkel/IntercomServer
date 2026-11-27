@@ -130,13 +130,15 @@ A healthy start reads, within about ten seconds of the container starting:
 2. `Decoded the built-in sounds with FFmpeg: doorbell.mp3 3.10 s, rejected.mp3 1.65 s, ring.mp3
    6.26 s`, the proof that the image's FFmpeg works: a server whose FFmpeg is missing or cannot
    decode stops here, naming the cause;
-3. `ChatGPT enabled; devices will stream audio to <AUDIO_HOST>:5004`;
-4. `Received state for device 0x…` and `Received configuration for device 0x…`, one for each device:
+3. `Found ffprobe <version>; the ambient tracks are in /data/ambient`, the proof that the image
+   carries ffprobe: a server whose ffprobe is missing stops here, naming the cause;
+4. `ChatGPT enabled; devices will stream audio to <AUDIO_HOST>:5004`;
+5. `Received state for device 0x…` and `Received configuration for device 0x…`, one for each device:
    the broker's retained messages, and the only proof of the MQTT connection, which succeeds
    silently;
-5. `Registered <N> MCP tool(s) across 6 server(s)`, `<N>` varying with the MCP servers.
+6. `Registered <N> MCP tool(s) across 6 server(s)`, `<N>` varying with the MCP servers.
 
-A failure is any of: a line of the five missing; `Initial MQTT connection failed`; `MQTT connection
+A failure is any of: a line of the six missing; `Initial MQTT connection failed`; `MQTT connection
 lost` with no later `Reconnected to the MQTT server`; an `[ERR]` or `[WRN]` line not named as noise
 below; a container not ready or restarted.
 
