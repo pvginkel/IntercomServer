@@ -74,5 +74,5 @@ table does not allow stops the server at its start, naming the setting.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DEVICES_TOPIC_PREFIXES` | `intercom/client,toilet_automation` | The topic prefixes devices publish under, comma-separated, each entry trimmed. Each is one or more topic levels separated by `/`, none of them empty or holding `+` or `#`, and none may lie under another. |
+| `DEVICES_TOPIC_PREFIXES` | `intercom/client,toilet_automation` | The topic prefixes devices publish under, comma-separated, each entry trimmed. Each is one or more topic levels separated by `/`, none of them empty or holding `+` or `#`. None may lie under another, and none may be, lie under or hold `intercom/server`, the server's own topics. |
 | `DOORBELL_EXTRA_DEVICES` | none | Device ids the doorbell also rings while they are online, comma-separated, each entry trimmed. Each is one topic level: not empty, and holding no `/`, `+` or `#`. |

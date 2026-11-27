@@ -182,6 +182,9 @@ public sealed class DiscoveryTests
     [InlineData("intercom//client")]
     [InlineData("intercom/client/")]
     [InlineData("intercom/client,intercom/client/kitchen")]
+    [InlineData("intercom/server")]
+    [InlineData("intercom/server/devices")]
+    [InlineData("intercom")]
     public async Task A_setting_with_a_prefix_the_server_cannot_read_devices_under_stops_its_start(
         string prefixes
     )

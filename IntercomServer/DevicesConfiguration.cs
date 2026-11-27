@@ -14,10 +14,14 @@ internal class DevicesConfiguration
     /// </summary>
     public IReadOnlyList<string> TopicPrefixes { get; init; } = ["intercom/client", "toilet_automation"];
 
+    // The server's own topics, which it reads ahead of every device prefix.
+    private const string ServerTopicPrefix = "intercom/server";
+
     /// <summary>
     /// Validates the configuration at startup, throwing on a prefix the server cannot subscribe
-    /// under, and on one that lies under another, which would leave a device's topic naming two
-    /// prefixes.
+    /// under, on one that lies under another, which would leave a device's topic naming two
+    /// prefixes, and on one that is, lies under or holds the server's own topics,
+    /// <c>intercom/server</c>, which would leave a device's topic naming the server.
     /// </summary>
     public void Validate()
     {
@@ -33,6 +37,16 @@ internal class DevicesConfiguration
                 throw new InvalidOperationException(
                     $"DEVICES_TOPIC_PREFIXES holds '{prefix}', which lies under '{outer}': a device's "
                         + "topic would name both."
+                );
+
+            if (
+                prefix == ServerTopicPrefix
+                || prefix.StartsWith(ServerTopicPrefix + "/")
+                || ServerTopicPrefix.StartsWith(prefix + "/")
+            )
+                throw new InvalidOperationException(
+                    $"DEVICES_TOPIC_PREFIXES holds '{prefix}', which overlaps the server's own topics "
+                        + $"under '{ServerTopicPrefix}': a device's topic would name the server."
                 );
         }
     }
