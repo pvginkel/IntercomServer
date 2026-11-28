@@ -14,6 +14,13 @@ publish `registry:5000/intercom-server:<n>` and pin it into pvginkel/IntercomDep
 production deploy.** The Deployment is `Recreate`: the intercoms, the doorbell and the ChatGPT
 replies are down from the old pod's stop until the new one has connected to MQTT, a few minutes.
 
+A slice can also ship pvginkel/IntercomClient, the Android app, and pvginkel/Architecture's
+producer registry, each pushed after this repo's deploy. A push to IntercomClient's `main` makes
+Jenkins job `Firmware/IntercomClient` sign its APK and publish it to this server, which offers it
+to every installed app as its update, and `AaC/IntercomClient` validate the app's architecture
+model: step 5. A push to Architecture's `main` rebuilds the estate's architecture viewer from every
+registered producer: step 6.
+
 No gate is known red: a failure in step 1 is this slice's and blocks.
 
 There is no local live check. The server does nothing without the MQTT broker and the devices on
@@ -29,9 +36,10 @@ named in the close-out. Everything below only reads.
 ## 0. Preconditions
 
 The driver has ff-merged every code phase into the base branch. Confirm `git status --short` is
-clean in this repo and in `/work/IntercomDeploy`: a dirty tree means an earlier phase left something
-behind, and that is a finding. Run every `kc project` verb from the repo's root; the CLI is
-cwd-bound.
+clean in this repo, in `/work/IntercomDeploy` and in `/work/IntercomClient`, and in
+`/work/scratch/Architecture` when the slice changed it: a dirty tree means an earlier phase left
+something behind, and that is a finding. Run every `kc project` verb from the repo's root; the CLI
+is cwd-bound.
 
 ## 1. The suites
 
@@ -56,6 +64,24 @@ When the slice changed pvginkel/IntercomDeploy, its gates too, which run in the 
 cd /work/IntercomDeploy && kc project test && kc project lint
 ```
 
+When the slice changed IntercomClient, its gates too, which run in the `android` and `aac-tools`
+tool containers:
+
+```bash
+cd /work/IntercomClient && kc project build && kc project test && kc project lint
+```
+
+`build` is the release build, with Android Lint's fatal checks; `test` the JVM unit tests, which
+its `Jenkinsfile`'s `Test` stage runs before the release build; `lint` the architecture model's
+`arch-validate`, a network call read as this repo's is. The `android` container holds 5 GiB, and
+one warm Gradle daemon has run it out of memory: a verb whose connection to it drops while
+`kc env describe` says it restarted for memory is run again on its own, once, and a second drop is
+*not verified*.
+
+pvginkel/Architecture has no gate here: its verbs run in the `modern-app` tool container, which
+this environment does not carry. Its proof is the `AaC/Architecture` build its push starts
+(step 6).
+
 ## 2. Push, then follow the roll
 
 Pushing is this phase's job, honouring any repo named in `plan.md`'s `## Push holds`. Rebase onto
@@ -66,6 +92,10 @@ IntercomDeploy's `main`.
 new image needs (a new environment variable, prompt file or secret) when the image rolls. Its
 landing rolls `intercom-prd` on its own, with the old image. The exception is a change that removes
 what the old image still reads: then this repo goes first.
+
+**IntercomClient goes last**, in step 5, once step 3 has found this repo's new pod healthy, so that
+its build publishes to the server the slice deployed. Architecture's registry follows in step 6,
+once the producer jobs its new entries name have a green build.
 
 **IntercomDeploy reaches `main` only at a SHA a plan Job has read.** Its PreSync hook applies its
 Terraform, the Keycloak clients among it, from whatever reaches `main`, so every commit there goes
@@ -244,12 +274,160 @@ A roll of IntercomDeploy's own commits, before this repo's push, that leaves the
 pin commit to revert. Its revert would be a commit like any other, through the plan Job: stop with
 `blocked` at once, with the roll's diagnosis.
 
-## 5. Check off `verification.json`
+## 5. IntercomClient's release
+
+When the slice changed pvginkel/IntercomClient, push it once step 3 has found the new pod healthy;
+after a rollback in step 4 it is not pushed, and the report says so. **Its push is a production
+deploy too**: the build publishes the APK to this server, and every installed app is offered it on
+its next start. The repo's one push hook builds two jobs: `Firmware/IntercomClient` (`Jenkinsfile`)
+tests, builds, signs, archives and publishes the APK, and `AaC/IntercomClient`
+(`Jenkinsfile.architecture`) validates and archives the architecture model.
+
+```bash
+cd /work/IntercomClient
+git fetch origin && git rebase origin/main && git push origin HEAD:main
+SHA=$(git rev-parse HEAD)
+timeout 3300 ~/.local/bin/track_build.py Firmware/IntercomClient --hash "$SHA" --diagnose
+timeout 1800 ~/.local/bin/track_build.py AaC/IntercomClient --hash "$SHA" --diagnose
+```
+
+Neither job pushes to a deploy repo, so `track_build.py` follows the build alone, its exit statuses
+as in step 2. `Publish apk` is `Firmware/IntercomClient`'s last stage, so a build red before it
+published nothing: a finding. Its pod inherits `jenkins-agent`, whose build container has no memory
+request or limit and holds what its node has free. A build the console shows killed for memory is a
+finding whose fix is the job on `jenkins-agent-large`, a change to the pipeline guide's POD-3 list
+in pvginkel/JenkinsPipelineUtils, made outside the slice.
+
+The build, read through Jenkins' API with the environment's `JENKINS_USER` and `JENKINS_TOKEN`:
+
+```bash
+J=(-fsS -u "$JENKINS_USER:$JENKINS_TOKEN"); N=<n>    # <n>: the build track_build.py named
+B="$JENKINS_URL/job/Firmware/job/IntercomClient/$N"
+curl "${J[@]}" "$B/wfapi/describe" | python3 -I -c 'import json,sys; [print(s["name"], s["status"]) for s in json.load(sys.stdin)["stages"]]'
+curl "${J[@]}" "$B/consoleText" | grep 'IntercomServer answered'
+curl "${J[@]}" "$B/api/json?tree=artifacts%5BrelativePath%5D"; echo
+```
+
+It reads `Checkout`, `Test`, `Build apk` and `Publish apk`, each `SUCCESS`; one line
+`IntercomServer answered 201`; and the one artifact, `app-release.apk`.
+
+Then the APK it archived, in a directory of its own, read in the `android` tool container:
+
+```bash
+D=/work/scratch/intercom-client-$N; mkdir "$D" && cd "$D"
+curl "${J[@]}" -o app-release.apk "$B/artifact/app-release.apk"
+cexec android sh -c '
+aapt2 dump badging app-release.apk | grep -E "^(package|minSdkVersion|targetSdkVersion|uses-permission):"
+res() { aapt2 dump resources app-release.apk | sed -n "\| $1\$|{n;s/.*(file) \([^ ]*\).*/\1/p}"; }
+aapt2 dump resources app-release.apk | grep -E " (xml/network_security_config|raw/homelab_root)\$"
+aapt2 dump xmltree app-release.apk --file "$(res xml/network_security_config)"
+unzip -p app-release.apk "$(res raw/homelab_root)" | cmp - /work/IntercomClient/app/src/main/res/raw/homelab_root.crt && echo "bundled root: the same file"
+apksigner verify --verbose --print-certs app-release.apk | grep -E "^(Verifies|Verified using v[23] |Signer #1 certificate SHA-256)"'
+```
+
+It reads:
+
+- `package: name='org.webathome.intercom' versionCode='<n>' versionName='<n>'`, the build's own
+  number as both, then `minSdkVersion:'26'` and `targetSdkVersion:'35'`;
+- the permissions, exactly: `android.permission.RECORD_AUDIO`, `REQUEST_INSTALL_PACKAGES`,
+  `INTERNET`, `ACCESS_NETWORK_STATE` and `WAKE_LOCK`, and androidx.core's own signature permission,
+  `org.webathome.intercom.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`. Another is a finding unless
+  the slice's criteria name it;
+- the network security config: one `domain-config`, its one `domain` this server's name (`$HOST`
+  below) with `includeSubdomains=false`, and its `trust-anchors` one `certificates` whose
+  `src=@0x…` is the id the resource line gives `raw/homelab_root`. No `base-config`, so every
+  other host keeps the system's trust. Then `bundled root: the same file`;
+- the signature: `Verifies`, v2 and v3 `true`, and `Signer #1 certificate SHA-256 digest: <d>`.
+  `<d>` differs from what the same command reads of `MyDownloads/MyDownloadsClient`'s last
+  successful `app-release.apk`, since the key is IntercomClient's own `keystore.jks`. From the
+  job's second build on, `<d>` is the previous build's: Android installs an update only over an
+  app the same key signed.
+
+Then the deployed proof of the publish, with no token, on the name and root the app uses:
+
+```bash
+HOST=$(sed -n 's/^  serverName: //p' /work/IntercomDeploy/config/prd/values.yaml)
+CA=/work/IntercomClient/app/src/main/res/raw/homelab_root.crt
+curl -fsS --cacert "$CA" "https://$HOST/updates?action=version"; echo
+curl -fsS --cacert "$CA" -o "$D/served.apk" "https://$HOST/updates?action=download" && cmp "$D/served.apk" "$D/app-release.apk" && echo "served: the archived apk"
+```
+
+The first answers `<n>`, the build's number: the release every installed app is now offered. The
+second shows the server serves the very file the build archived. A release whose checks above fail
+is offered all the same: a blocking finding, reported at once. The server offers the highest
+version code it holds and has no route that withdraws one, so only a later good build replaces it.
+
+Once IntercomClient's producer is registered (step 6), a green `AaC/IntercomClient` build starts
+`AaC/Architecture` itself, which `track_build.py` never follows from an architecture job: when the
+slice changed IntercomClient's model, read the report of the `AaC/Architecture` build that started
+after it, as step 6 reads one.
+
+**The phone's checks are the operator's**, named in the close-out; nothing here installs the app,
+signs in or touches its screen:
+
+- the first install, of the signed `app-release.apk` this build archived, from the build's page in
+  Jenkins: the app starts on its sign-in;
+- the screen, against production: signing in, the list, playing, renaming, disabling, enabling and
+  deleting, recording and uploading, as the slice's criteria word them;
+- the update offer, once a later push to IntercomClient's `main` has published a release above the
+  installed one: the app's start offers it, and before its first install Android asks the operator
+  to let Intercom install apps.
+
+A criterion `verification.json` marks owed after one of them is marked as the operator's, never as
+passed.
+
+## 6. Architecture's producer registry
+
+When the slice changed pvginkel/Architecture's `pipeline-producers.yaml`, checked out at
+`/work/scratch/Architecture`, push it only once each producer job its new entries name has a green
+build: `AaC/Architecture` copies every registered producer's last successful artifacts, and a job
+with none fails it. For IntercomClient's producer, that job is step 5's `AaC/IntercomClient`:
+
+```bash
+J=(-fsS -u "$JENKINS_USER:$JENKINS_TOKEN")
+curl "${J[@]}" "$JENKINS_URL/job/AaC/job/IntercomClient/lastSuccessfulBuild/api/json?tree=number,result"; echo
+```
+
+It answers the build's number and `SUCCESS`; a 404 is no green build, and the push waits.
+
+```bash
+cd /work/scratch/Architecture
+git fetch origin && git rebase origin/main && git push origin HEAD:main
+timeout 3300 ~/.local/bin/track_build.py AaC/Architecture --hash "$(git rev-parse HEAD)" --diagnose
+```
+
+The build collects every producer's model, validates the federation, builds the
+`architecture_viewer` image and pins it into the estate's deploy repo, whose roll `track_build.py`
+follows; its exit statuses read as in step 2. The job waits 90 seconds in the queue first
+(`quietPeriod(90)`), and any producer's green build starts it too and aborts the one under way: a
+build aborted so is not a failure, and `track_build.py AaC/Architecture --buildnr <m>` follows the
+one that replaced it. A red build pinned nothing, since collection and validation run before the
+image is built, and the viewer stays on its last image: a finding. So is a failed roll, with the
+diagnosis `track_build.py` wrote. Its pin commit is Jenkins', and nothing is reverted from here.
+
+Then its validation report. The collector runs `--relaxed`, so an edge naming an id no producer
+declares is a warning, and the build stays green:
+
+```bash
+M=<m>    # <m>: the build track_build.py named
+curl "${J[@]}" "$JENKINS_URL/job/AaC/job/Architecture/$M/artifact/dist/data/v0.1/validation-report.json" | python3 -I -c '
+import json,sys
+r=json.load(sys.stdin); print(r["summary"])
+for w in r["warnings"]: print(w["kind"], w.get("producer"), w.get("reference", ""))'
+grep -c '^  - id:' /work/scratch/Architecture/pipeline-producers.yaml
+```
+
+The summary's `producers` is the pushed list's entry count, the last line, and no warning's
+producer is a new entry's id. A `dangling-reference` from `intercom-client` is an edge of
+IntercomClient's model that names no element of the federation: a finding against that model.
+Other producers' warnings are not the slice's.
+
+## 7. Check off `verification.json`
 
 Mark each acceptance criterion with the evidence that settled it: the command run and what it
-returned. A criterion nothing in steps 1–3 exercised is an untested criterion (a finding) or a check
-missing from this doc, not "passed by inspection". An operator's check is marked as theirs, never
-as passed.
+returned. A criterion nothing in steps 1 to 6 exercised is an untested criterion (a finding) or a
+check missing from this doc, not "passed by inspection". An operator's check is marked as theirs,
+never as passed.
 
 ## Findings
 
