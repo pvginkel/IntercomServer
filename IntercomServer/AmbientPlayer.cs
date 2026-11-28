@@ -69,6 +69,13 @@ internal sealed class AmbientPlayer(
     private readonly Dictionary<string, Playback> _playbacks = new();
     private readonly Dictionary<string, string> _lastPlayed = new();
 
+    /// <summary>
+    /// Raised, with the device, as a playback's sound begins, ahead of its start's answer, and as
+    /// a playback whose sound began ends, ahead of its end: what <see cref="Playing"/> answers has
+    /// changed. A handler runs on the playback's own task, and must neither block nor throw.
+    /// </summary>
+    public event EventHandler<DeviceEventArgs>? PlayingChanged;
+
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
         devices.DeviceRemoved += (_, e) => Stop(e.Device);
@@ -228,6 +235,7 @@ internal sealed class AmbientPlayer(
                 playback.Track = prepared.Track;
                 _lastPlayed[device.DeviceId] = prepared.Track;
             }
+            PlayingChanged?.Invoke(this, new DeviceEventArgs(device));
 
             Logger.Information(
                 "Playing ambient track {Track} on device {Device} at a gain of {Gain:0.0} dB",
@@ -265,13 +273,17 @@ internal sealed class AmbientPlayer(
             if (previous != null)
                 await previous.Ended.Task;
 
+            bool played;
             lock (_syncRoot)
             {
+                played = playback.Track != null;
                 playback.Track = null;
                 if (_playbacks.GetValueOrDefault(device.DeviceId) == playback)
                     _playbacks.Remove(device.DeviceId);
             }
 
+            if (played)
+                PlayingChanged?.Invoke(this, new DeviceEventArgs(device));
             playback.Ended.SetResult();
         }
     }

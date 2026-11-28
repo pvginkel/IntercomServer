@@ -2,6 +2,7 @@
 using IntercomServer.Utils;
 using MQTTnet;
 using MQTTnet.Internal;
+using MQTTnet.Protocol;
 using Serilog;
 
 namespace IntercomServer;
@@ -15,10 +16,25 @@ internal class Server(
     StateManager state,
     AlarmManager alarmManager,
     PlaybackManager playbackManager,
-    AmbientPlayer ambientPlayer
+    AmbientPlayer ambientPlayer,
+    AmbientSwitch ambientSwitch
 ) : IAsyncDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<Server>();
+
+    /// <summary>
+    /// Where the server says, retained, whether it is connected: <see cref="Online"/> after each
+    /// connect, and <see cref="Offline"/> at a clean stop, or by its MQTT last will once the
+    /// broker has lost the connection.
+    /// </summary>
+    public const string StatusTopic = "intercom/server/status";
+
+    public const string Online = "online";
+
+    public const string Offline = "offline";
+
+    // The topic of a switch's command, under intercom/server/.
+    private static readonly Regex AmbientCommandRe = new("^devices/(?<device>[^/]+)/set/ambient$", RegexOptions.Compiled);
 
     // What the server reads under each device's prefix, in the order it subscribes to them.
     private static readonly string[] DeviceTopics = ["state", "ready", "configuration", "set/action"];
@@ -52,10 +68,12 @@ internal class Server(
     {
         alarmManager.AlarmExpired += AlarmManager_AlarmExpired;
 
-        var mqttClientOptionsBuilder = new MqttClientOptionsBuilder().WithTcpServer(
-            configuration.Host,
-            configuration.Port
-        );
+        var mqttClientOptionsBuilder = new MqttClientOptionsBuilder()
+            .WithTcpServer(configuration.Host, configuration.Port)
+            .WithWillTopic(StatusTopic)
+            .WithWillPayload(Offline)
+            .WithWillRetain()
+            .WithWillQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce);
 
         if (!string.IsNullOrEmpty(configuration.Username))
         {
@@ -119,11 +137,14 @@ internal class Server(
         // Subscriptions don't survive a reconnect (clean session), so (re)establish them on every
         // successful connect.
         await client.SubscribeAsync("intercom/server/set/+", cancellationToken: cancellationToken);
+        await client.SubscribeAsync(AmbientSwitch.CommandFilter, cancellationToken: cancellationToken);
         foreach (var prefix in devicesConfiguration.TopicPrefixes)
         {
             foreach (var topic in DeviceTopics)
                 await client.SubscribeAsync($"{prefix}/+/{topic}", cancellationToken: cancellationToken);
         }
+
+        await PublishStatusAsync(Online, cancellationToken);
 
         _subscribed = true;
     }
@@ -255,6 +276,12 @@ internal class Server(
 
     private void HandleServerMessage(string topic, MqttApplicationMessage message)
     {
+        if (AmbientCommandRe.Match(topic) is { Success: true } ambientCommand)
+        {
+            ambientSwitch.HandleCommand(ambientCommand.Groups["device"].Value, message);
+            return;
+        }
+
         switch (topic)
         {
             case "set/ring_doorbell":
@@ -305,6 +332,8 @@ internal class Server(
                     device.DeviceId,
                     device.Configuration
                 );
+
+                ambientSwitch.HandleConfiguration(device);
                 break;
 
             case "state":
@@ -365,6 +394,17 @@ internal class Server(
         }
     }
 
+    private Task PublishStatusAsync(string status, CancellationToken cancellationToken) =>
+        client.PublishAsync(
+            new MqttApplicationMessageBuilder()
+                .WithTopic(StatusTopic)
+                .WithPayload(status)
+                .WithRetainFlag()
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                .Build(),
+            cancellationToken
+        );
+
     public async ValueTask DisposeAsync()
     {
         // Disposed both explicitly (Service.StopAsync) and by the DI container at host shutdown;
@@ -378,6 +418,8 @@ internal class Server(
 
         try
         {
+            // A clean disconnect fires no will.
+            await PublishStatusAsync(Offline, CancellationToken.None);
             await client.DisconnectAsync(_factory.CreateClientDisconnectOptionsBuilder().Build());
         }
         catch (Exception ex)

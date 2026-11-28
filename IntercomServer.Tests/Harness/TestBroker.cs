@@ -1,6 +1,7 @@
 using System.Net;
 using MQTTnet;
 using MQTTnet.Formatter;
+using MQTTnet.Protocol;
 using MQTTnet.Server;
 
 namespace IntercomServer.Tests.Harness;
@@ -12,6 +13,9 @@ namespace IntercomServer.Tests.Harness;
 internal sealed class TestBroker : IAsyncDisposable
 {
     private readonly MqttServer _server;
+
+    // The ids of the clients the test connected itself; the server's is none of them.
+    private readonly HashSet<string> _testClients = [];
 
     private TestBroker(MqttServer server, int port)
     {
@@ -59,10 +63,27 @@ internal sealed class TestBroker : IAsyncDisposable
             .WithProtocolVersion(MqttProtocolVersion.V500)
             .Build();
 
+        lock (_testClients)
+            _testClients.Add(clientId);
+
         using var timeout = new CancellationTokenSource(Timeouts.Observe);
         await client.ConnectAsync(options, timeout.Token);
 
         return client;
+    }
+
+    /// <summary>
+    /// Closes the server's connection from the broker's side, as a lost network does: the broker
+    /// publishes the server's last will, and the server connects again on its own.
+    /// </summary>
+    public async Task DropServerAsync()
+    {
+        var clients = await _server.GetClientsAsync();
+        MqttClientStatus server;
+        lock (_testClients)
+            server = Assert.Single(clients, client => !_testClients.Contains(client.Id));
+
+        await server.DisconnectAsync(new MqttServerClientDisconnectOptions { ReasonCode = MqttDisconnectReasonCode.UnspecifiedError });
     }
 
     public async ValueTask DisposeAsync()

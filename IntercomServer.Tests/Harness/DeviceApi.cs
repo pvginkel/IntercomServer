@@ -126,13 +126,20 @@ internal static class DeviceApi
         return toilet;
     }
 
-    /// <summary>The configuration a ToiletAutomation unit publishes: no <c>in</c> format, and <see cref="ToiletFormat"/> out.</summary>
+    /// <summary>
+    /// The configuration a ToiletAutomation unit publishes: the <c>unique_id</c> its firmware
+    /// gives it, its prefix and its id, no <c>in</c> format, and <see cref="ToiletFormat"/> out.
+    /// </summary>
     public static JsonObject ToiletConfiguration(TestDevice toilet)
     {
         var configuration = toilet.ConfigurationWithoutMicrophone();
+        configuration["unique_id"] = UniqueId(toilet);
         configuration["audio_formats"]!["out"]!["sample_rate"] = ToiletFormat.SampleRate;
         return configuration;
     }
+
+    /// <summary>The <c>unique_id</c> of <see cref="ToiletConfiguration"/>, the identifier of the toilet's page in Home Assistant.</summary>
+    public static string UniqueId(TestDevice toilet) => $"{ToiletPrefix}_{toilet.DeviceId}";
 
     /// <summary>
     /// The device an answer holds, an object of exactly <c>id</c>, <c>prefix</c>,

@@ -25,6 +25,7 @@ internal sealed class ServerHarness : IAsyncDisposable
     private readonly IHost _host;
     private readonly IMqttClient _homeAssistant;
     private readonly List<TestDevice> _devices = [];
+    private readonly List<MqttObserver> _observers = [];
     private bool _serverStopped;
 
     private ServerHarness(
@@ -194,18 +195,40 @@ internal sealed class ServerHarness : IAsyncDisposable
 
     /// <summary>
     /// Publishes as Home Assistant does, at QoS 1, so the server receives it after everything
-    /// published before it (see <see cref="TestDevice.PublishAsync"/>).
+    /// published before it (see <see cref="TestDevice.PublishAsync"/>), and, with
+    /// <paramref name="retain"/>, retained, as a switch set to retain its commands does.
     /// </summary>
-    public async Task PublishAsync(string topic, string payload)
+    public async Task PublishAsync(string topic, string payload, bool retain = false)
     {
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
             .WithPayload(payload)
             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+            .WithRetainFlag(retain)
             .Build();
 
         using var timeout = new CancellationTokenSource(Timeouts.Observe);
         await _homeAssistant.PublishAsync(message, timeout.Token);
+    }
+
+    /// <summary>
+    /// Subscribes, as Home Assistant does, to <paramref name="topicFilters"/>, and records what
+    /// arrives there from now on, the messages the broker retains first.
+    /// </summary>
+    public async Task<MqttObserver> ObserveAsync(params string[] topicFilters)
+    {
+        var observer = await MqttObserver.SubscribeAsync(Broker, topicFilters);
+        _observers.Add(observer);
+        return observer;
+    }
+
+    /// <summary>The message the broker retains on <paramref name="topic"/>, as a new subscription receives it.</summary>
+    public async Task<ObservedMessage> RetainedAsync(string topic)
+    {
+        await using var observer = await MqttObserver.SubscribeAsync(Broker, topic);
+        var message = await observer.NextAsync();
+        Assert.True(message.Retained, $"The broker retains nothing on {topic}.");
+        return message;
     }
 
     public Task RingDoorbellAsync() => PublishAsync("intercom/server/set/ring_doorbell", "true");
@@ -284,6 +307,8 @@ internal sealed class ServerHarness : IAsyncDisposable
     {
         foreach (var device in _devices)
             await device.DisposeAsync();
+        foreach (var observer in _observers)
+            await observer.DisposeAsync();
 
         await _homeAssistant.DisconnectAsync();
         _homeAssistant.Dispose();

@@ -131,8 +131,9 @@ internal partial class Program
                 services.AddHostedService(p => p.GetRequiredService<SoundLibrary>());
                 services.AddHostedService(p => p.GetRequiredService<TrackStore>());
                 services.AddHostedService<Service>();
-                // Hosted services stop in the reverse of this order, so the playbacks end while
-                // the server is still connected.
+                // Hosted services stop in the reverse of this order, so the playbacks end, and the
+                // switch publishes their ends, while the server is still connected.
+                services.AddHostedService(p => p.GetRequiredService<AmbientSwitch>());
                 services.AddHostedService(p => p.GetRequiredService<AmbientPlayer>());
                 services.AddSingleton(
                     new ServerConfiguration
@@ -238,6 +239,7 @@ internal partial class Program
                 services.AddSingleton<AlarmManager>();
                 services.AddSingleton<PlaybackManager>();
                 services.AddSingleton<AmbientPlayer>();
+                services.AddSingleton<AmbientSwitch>();
                 services.AddSingleton(new AudioDecoder("ffmpeg"));
                 services.AddSingleton<SoundLibrary>();
                 services.AddSingleton<AudioSender>();
