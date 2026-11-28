@@ -286,9 +286,9 @@ public sealed class PacingTests
             await Task.Delay(TimeSpan.FromSeconds(1.5), TestContext.Current.CancellationToken);
             await reply.CompleteAsync();
         }
-        // What the stream had sent ahead, the reply, and a second and a half of the resumed sound,
-        // a packet each 20 ms.
-        packets.AddRange(await device.NextPacketsAsync(25 + 10 + 75));
+        // The reply and about two seconds of the resumed sound, a packet each 20 ms. The stream sent
+        // its whole lead in its first 100 ms, so only a packet or two of it came after the 30 taken.
+        packets.AddRange(await device.NextPacketsAsync(10 + 100));
         var (_, end) = AmbientAudio.FindSound(packets, new byte[10 * LivePlayback.ChunkBytes], looped: false);
         var resumed = packets.Skip(end).ToList();
 
