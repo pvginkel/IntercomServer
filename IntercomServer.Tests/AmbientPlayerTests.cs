@@ -14,9 +14,9 @@ namespace IntercomServer.Tests;
 /// without a gap on the device's counter, and faded out over half a second at its stop, after
 /// which nothing more is sent: a stop by the routes, the device going offline or being removed,
 /// or the server's shutdown, which waits for every fade-out. It plays its own copy of the track, follows the endpoint the device
-/// advertises, and is the device's only one. A start without a track picks an enabled one at
-/// random, never the one the device last played unless it is the only one, and nothing of a
-/// playback is written anywhere.
+/// advertises, and is the device's only one. A start without a track picks an Ambient one at
+/// random, never an Occasional or a Disabled one, nor the one the device last played unless it is
+/// the only one, and nothing of a playback is written anywhere.
 /// </summary>
 public sealed class AmbientPlayerTests
 {
@@ -109,7 +109,7 @@ public sealed class AmbientPlayerTests
     }
 
     [Fact]
-    public async Task A_start_naming_a_track_plays_it_enabled_or_disabled_and_one_without_a_track_with_none_enabled_answers_409()
+    public async Task A_start_naming_a_track_plays_it_in_any_state_and_one_without_a_track_with_none_Ambient_answers_409()
     {
         await using var harness = await ServerHarness.StartAsync();
         var toilet = await harness.AddToiletAsync("0x0b0001");
@@ -118,47 +118,58 @@ public sealed class AmbientPlayerTests
         using (var none = await harness.StartAmbientAsync(token, toilet.DeviceId))
         {
             Assert.Equal(HttpStatusCode.Conflict, none.StatusCode);
-            Assert.Equal("There is no enabled track to play.", await TrackApi.ReadProblemDetailAsync(none));
+            Assert.Equal("No track is set to Ambient.", await TrackApi.ReadProblemDetailAsync(none));
         }
 
         var rain = await Tracks.WhiteNoiseAsync("wav", TrackLength, seed: 1);
         var snow = await Tracks.WhiteNoiseAsync("wav", TrackLength, seed: 2);
         await harness.UploadAsync("Rain", rain);
         await harness.UploadAsync("Snow", snow);
-        await harness.TrackStore().UpdateAsync("Rain", null, false, Cancellation);
-        await harness.TrackStore().UpdateAsync("Snow", null, false, Cancellation);
+        await harness.TrackStore().UpdateAsync("Rain", null, TrackState.Occasional, Cancellation);
+        await harness.TrackStore().UpdateAsync("Snow", null, TrackState.Disabled, Cancellation);
 
-        using (var disabled = await harness.StartAmbientAsync(token, toilet.DeviceId))
+        using (var noneAmbient = await harness.StartAmbientAsync(token, toilet.DeviceId))
         {
-            Assert.Equal(HttpStatusCode.Conflict, disabled.StatusCode);
-            Assert.Equal("There is no enabled track to play.", await TrackApi.ReadProblemDetailAsync(disabled));
+            Assert.Equal(HttpStatusCode.Conflict, noneAmbient.StatusCode);
+            Assert.Equal("No track is set to Ambient.", await TrackApi.ReadProblemDetailAsync(noneAmbient));
         }
 
         // A name is looked up ignoring case.
         Assert.Equal("Snow", await harness.PlayAmbientAsync(toilet, "snow"));
-        var packets = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.7)));
+        var disabled = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.7)));
         await harness.EndAmbientAsync(toilet);
-        packets.AddRange(await AmbientAudio.RestAsync(toilet));
+        disabled.AddRange(await AmbientAudio.RestAsync(toilet));
+        Assert.Equal("Rain", await harness.PlayAmbientAsync(toilet, "RAIN"));
+        var occasional = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.7)));
+        await harness.EndAmbientAsync(toilet);
+        occasional.AddRange(await AmbientAudio.RestAsync(toilet));
 
         AmbientAudio.AssertOnePlayback(
-            AmbientAudio.Samples(packets),
+            AmbientAudio.Samples(disabled),
             await AmbientAudio.DecodedAsync(snow, DeviceApi.ToiletFormat),
+            AmbientAudio.Fade,
+            fadedOut: true
+        );
+        AmbientAudio.AssertOnePlayback(
+            AmbientAudio.Samples(occasional),
+            await AmbientAudio.DecodedAsync(rain, DeviceApi.ToiletFormat),
             AmbientAudio.Fade,
             fadedOut: true
         );
     }
 
     [Fact]
-    public async Task A_start_without_a_track_picks_an_enabled_one_at_random_never_the_one_the_device_last_played_and_writes_nothing()
+    public async Task A_start_without_a_track_picks_an_Ambient_one_at_random_never_an_Occasional_or_Disabled_one_nor_the_one_the_device_last_played_and_writes_nothing()
     {
         await using var harness = await ServerHarness.StartAsync(
             new Dictionary<string, string?> { ["AMBIENT_FADE_MS"] = "0" }
         );
         var toilet = await harness.AddToiletAsync("0x0b0001");
         var recording = await Tracks.WhiteNoiseAsync("wav", TimeSpan.FromSeconds(0.2));
-        foreach (var name in new[] { "A", "B", "C", "D" })
+        foreach (var name in new[] { "A", "B", "C", "D", "E" })
             await harness.UploadAsync(name, recording);
-        await harness.TrackStore().UpdateAsync("D", null, false, Cancellation);
+        await harness.TrackStore().UpdateAsync("D", null, TrackState.Disabled, Cancellation);
+        await harness.TrackStore().UpdateAsync("E", null, TrackState.Occasional, Cancellation);
         var stored = DataVolume(harness);
 
         var picked = new List<string>();
@@ -174,9 +185,9 @@ public sealed class AmbientPlayerTests
         Assert.Equal(stored, DataVolume(harness));
         Assert.Null((await harness.AwaitDeviceAsync(toilet.DeviceId, _ => true)).Track);
 
-        // The one enabled track is picked every time, though the device last played it.
-        await harness.TrackStore().UpdateAsync("B", null, false, Cancellation);
-        await harness.TrackStore().UpdateAsync("C", null, false, Cancellation);
+        // The one Ambient track is picked every time, though the device last played it.
+        await harness.TrackStore().UpdateAsync("B", null, TrackState.Disabled, Cancellation);
+        await harness.TrackStore().UpdateAsync("C", null, TrackState.Occasional, Cancellation);
         for (var start = 0; start < 3; start++)
         {
             Assert.Equal("A", await harness.PlayAmbientAsync(toilet));
@@ -336,7 +347,7 @@ public sealed class AmbientPlayerTests
         var packets = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.6)));
         Assert.NotNull((await store.UpdateAsync("Rain", "Drizzle", null, Cancellation)).Track);
         packets.AddRange(await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.2))));
-        Assert.NotNull((await store.UpdateAsync("Drizzle", null, false, Cancellation)).Track);
+        Assert.NotNull((await store.UpdateAsync("Drizzle", null, TrackState.Disabled, Cancellation)).Track);
         packets.AddRange(await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.2))));
         Assert.NotNull((await store.DeleteAsync("Drizzle", Cancellation)).Track);
         // On past the loop's seam, where a playback that read the file again would find it gone.

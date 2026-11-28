@@ -57,14 +57,14 @@ internal static class TrackApi
     ) => harness.SendAsync(HttpMethod.Get, $"{TrackPath(name)}/audio", token, range: range);
 
     /// <summary>
-    /// The track an answer holds, an object of exactly <c>name</c>, <c>enabled</c> and
+    /// The track an answer holds, an object of exactly <c>name</c>, <c>state</c> and
     /// <c>duration</c>.
     /// </summary>
-    public static (string Name, bool Enabled, double Duration) ReadTrack(JsonNode? answer)
+    public static (string Name, string State, double Duration) ReadTrack(JsonNode? answer)
     {
         var track = Assert.IsType<JsonObject>(answer);
-        Assert.Equal(["duration", "enabled", "name"], track.Select(property => property.Key).Order(StringComparer.Ordinal));
-        return ((string)track["name"]!, (bool)track["enabled"]!, (double)track["duration"]!);
+        Assert.Equal(["duration", "name", "state"], track.Select(property => property.Key).Order(StringComparer.Ordinal));
+        return ((string)track["name"]!, (string)track["state"]!, (double)track["duration"]!);
     }
 
     /// <summary>The <c>detail</c> of a problem the server answered, asserting the answer is one.</summary>

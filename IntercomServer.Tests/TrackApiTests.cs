@@ -12,8 +12,9 @@ namespace IntercomServer.Tests;
 /// The track API, under <c>/api/ambient-tracks</c>, as the app calls it with a token holding the
 /// client role <c>user</c>: the list, the upload, a change, the delete and the audio, over the
 /// track store's real files and the real ffprobe. A track is answered as an object of
-/// <c>name</c>, <c>enabled</c> and <c>duration</c> in seconds; what the store refuses answers a
-/// problem whose <c>detail</c> says why: 400, 404, 409 or 413.
+/// <c>name</c>, <c>state</c>, one of <c>ambient</c>, <c>occasional</c> and <c>disabled</c>, and
+/// <c>duration</c> in seconds; what the store refuses answers a problem whose <c>detail</c> says
+/// why: 400, 404, 409 or 413.
 /// </summary>
 public sealed class TrackApiTests
 {
@@ -32,7 +33,7 @@ public sealed class TrackApiTests
         {
             ["list"] = token => harness.ListTracksAsync(token),
             ["upload"] = token => harness.UploadTrackAsync(token, "Snow", recording),
-            ["change"] = token => harness.ChangeTrackAsync(token, "Rain", new { enabled = false }),
+            ["change"] = token => harness.ChangeTrackAsync(token, "Rain", new { state = "disabled" }),
             ["delete"] = token => harness.DeleteTrackAsync(token, "Rain"),
             ["audio"] = token => harness.GetTrackAudioAsync(token, "Rain"),
         };
@@ -69,7 +70,7 @@ public sealed class TrackApiTests
     }
 
     [Fact]
-    public async Task The_list_answers_each_track_by_name_enabled_and_duration_in_seconds_sorted_by_name()
+    public async Task The_list_answers_each_track_by_name_state_and_duration_in_seconds_sorted_by_name()
     {
         await using var harness = await ServerHarness.StartAsync();
         var token = harness.UserToken();
@@ -84,22 +85,24 @@ public sealed class TrackApiTests
             );
             Assert.Equal(HttpStatusCode.Created, uploaded.StatusCode);
         }
-        using var disabled = await harness.ChangeTrackAsync(token, "Banana", new { enabled = false });
+        using var disabled = await harness.ChangeTrackAsync(token, "Banana", new { state = "disabled" });
+        using var occasional = await harness.ChangeTrackAsync(token, "cherry", new { state = "occasional" });
         using var three = await harness.ListTracksAsync(token);
 
         Assert.Equal(HttpStatusCode.OK, none.StatusCode);
         Assert.Equal("[]", await none.Content.ReadAsStringAsync(Cancellation));
         Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, occasional.StatusCode);
         Assert.Equal(HttpStatusCode.OK, three.StatusCode);
         Assert.Equal("application/json", three.Content.Headers.ContentType?.MediaType);
         Assert.Equal(
-            """[{"name":"apple","enabled":true,"duration":1},{"name":"Banana","enabled":false,"duration":2},{"name":"cherry","enabled":true,"duration":3}]""",
+            """[{"name":"apple","state":"ambient","duration":1},{"name":"Banana","state":"disabled","duration":2},{"name":"cherry","state":"occasional","duration":3}]""",
             await three.Content.ReadAsStringAsync(Cancellation)
         );
     }
 
     [Fact]
-    public async Task An_upload_answers_201_with_the_track_now_an_enabled_file_of_its_name()
+    public async Task An_upload_answers_201_with_the_track_now_an_Ambient_file_of_its_name()
     {
         await using var harness = await ServerHarness.StartAsync();
         var recording = await Tracks.RecordingAsync("m4a", Length);
@@ -109,9 +112,9 @@ public sealed class TrackApiTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
         Assert.Equal("/api/ambient-tracks/Rain%20on%20the%20skylight", response.Headers.Location?.OriginalString);
-        var (name, enabled, duration) = TrackApi.ReadTrack(await response.Content.ReadFromJsonAsync<JsonNode>(Cancellation));
+        var (name, state, duration) = TrackApi.ReadTrack(await response.Content.ReadFromJsonAsync<JsonNode>(Cancellation));
         Assert.Equal("Rain on the skylight", name);
-        Assert.True(enabled);
+        Assert.Equal("ambient", state);
         AssertLasts(Length, duration);
         Assert.Equal(["Rain on the skylight.m4a"], harness.AmbientFiles("enabled"));
         Assert.Equal(
@@ -226,12 +229,12 @@ public sealed class TrackApiTests
     }
 
     [Fact]
-    public async Task An_upload_of_a_name_a_track_in_either_folder_has_ignoring_case_answers_409()
+    public async Task An_upload_of_a_name_a_track_in_any_folder_has_ignoring_case_answers_409()
     {
         await using var harness = await ServerHarness.StartAsync();
         var token = harness.UserToken();
         using var first = await harness.UploadTrackAsync(token, "Rain", await Tracks.RecordingAsync("m4a", Length));
-        using var disabled = await harness.ChangeTrackAsync(token, "Rain", new { enabled = false });
+        using var disabled = await harness.ChangeTrackAsync(token, "Rain", new { state = "disabled" });
 
         using var response = await harness.UploadTrackAsync(token, "RAIN", await Tracks.RecordingAsync("wav", Length));
 
@@ -366,28 +369,47 @@ public sealed class TrackApiTests
     }
 
     [Fact]
-    public async Task A_change_renames_disables_and_enables_the_track_and_answers_it()
+    public async Task A_change_renames_the_track_and_moves_it_between_any_two_states_and_answers_it()
     {
         await using var harness = await ServerHarness.StartAsync();
         var token = harness.UserToken();
         using var uploaded = await harness.UploadTrackAsync(token, "Rain", await Tracks.RecordingAsync("wav", Length));
 
         using var renamed = await harness.ChangeTrackAsync(token, "Rain", new { name = "Rain on the skylight" });
-        var afterRename = harness.AmbientFiles("enabled");
-        using var disabled = await harness.ChangeTrackAsync(token, "Rain on the skylight", new { enabled = false });
-        var afterDisable = harness.AmbientFiles("disabled");
-        using var both = await harness.ChangeTrackAsync(token, "rain on the skylight", new { name = "Rain", enabled = true });
+        var afterRename = Placed(harness);
+        using var both = await harness.ChangeTrackAsync(token, "rain on the skylight", new { name = "Rain", state = "occasional" });
+        var afterBoth = Placed(harness);
+        // With the change before, each of the six moves from one state to another, once.
+        var moves = new List<(string State, string Folder, (string, string, double) Answer, string[] Placed)>();
+        foreach (var (state, folder) in new[]
+                 {
+                     ("disabled", "disabled"),
+                     ("ambient", "enabled"),
+                     ("disabled", "disabled"),
+                     ("occasional", "occasional"),
+                     ("ambient", "enabled"),
+                 })
+        {
+            using var moved = await harness.ChangeTrackAsync(token, "Rain", new { state });
+            moves.Add((state, folder, await ReadTrackAsync(moved), Placed(harness)));
+        }
         using var nothing = await harness.ChangeTrackAsync(token, "Rain", new { });
 
         Assert.Equal(HttpStatusCode.Created, uploaded.StatusCode);
-        Assert.Equal(("Rain on the skylight", true, 3.0), await ReadTrackAsync(renamed));
-        Assert.Equal(["Rain on the skylight.wav"], afterRename);
-        Assert.Equal(("Rain on the skylight", false, 3.0), await ReadTrackAsync(disabled));
-        Assert.Equal(["Rain on the skylight.wav"], afterDisable);
-        Assert.Equal(("Rain", true, 3.0), await ReadTrackAsync(both));
-        Assert.Equal(("Rain", true, 3.0), await ReadTrackAsync(nothing));
-        Assert.Equal(["Rain.wav"], harness.AmbientFiles("enabled"));
-        Assert.Empty(harness.AmbientFiles("disabled"));
+        Assert.Equal(("Rain on the skylight", "ambient", 3.0), await ReadTrackAsync(renamed));
+        Assert.Equal(["enabled/Rain on the skylight.wav"], afterRename);
+        Assert.Equal(("Rain", "occasional", 3.0), await ReadTrackAsync(both));
+        Assert.Equal(["occasional/Rain.wav"], afterBoth);
+        Assert.All(
+            moves,
+            move =>
+            {
+                Assert.Equal(("Rain", move.State, 3.0), move.Answer);
+                Assert.Equal([$"{move.Folder}/Rain.wav"], move.Placed);
+            }
+        );
+        Assert.Equal(("Rain", "ambient", 3.0), await ReadTrackAsync(nothing));
+        Assert.Equal(["enabled/Rain.wav"], Placed(harness));
     }
 
     [Fact]
@@ -398,31 +420,31 @@ public sealed class TrackApiTests
         using var rain = await harness.UploadTrackAsync(token, "Rain", await Tracks.RecordingAsync("m4a", Length));
         using var snow = await harness.UploadTrackAsync(token, "Snow", await Tracks.RecordingAsync("wav", Length));
 
-        using var taken = await harness.ChangeTrackAsync(token, "Rain", new { name = "SNOW", enabled = false });
-        using var broken = await harness.ChangeTrackAsync(token, "Rain", new { name = "Rain?", enabled = false });
+        using var taken = await harness.ChangeTrackAsync(token, "Rain", new { name = "SNOW", state = "disabled" });
+        using var broken = await harness.ChangeTrackAsync(token, "Rain", new { name = "Rain?", state = "occasional" });
 
         Assert.Equal(HttpStatusCode.Conflict, taken.StatusCode);
         Assert.Equal("The name 'SNOW' is taken, by enabled/Snow.wav.", await TrackApi.ReadProblemDetailAsync(taken));
         Assert.Equal(HttpStatusCode.BadRequest, broken.StatusCode);
         Assert.Equal("A track's name cannot hold '?'.", await TrackApi.ReadProblemDetailAsync(broken));
-        Assert.Equal(["Rain.m4a", "Snow.wav"], harness.AmbientFiles("enabled"));
-        Assert.Empty(harness.AmbientFiles("disabled"));
+        Assert.Equal(["enabled/Rain.m4a", "enabled/Snow.wav"], Placed(harness));
     }
 
     [Fact]
-    public async Task A_change_that_is_not_a_JSON_object_of_name_and_enabled_answers_400()
+    public async Task A_change_that_is_not_a_JSON_object_of_name_and_state_answers_400()
     {
         await using var harness = await ServerHarness.StartAsync();
         var token = harness.UserToken();
         using var uploaded = await harness.UploadTrackAsync(token, "Rain", await Tracks.RecordingAsync("m4a", Length));
         var changes = new Dictionary<string, HttpContent>
         {
-            ["plain text"] = new StringContent("""{"enabled":false}""", Encoding.UTF8, "text/plain"),
+            ["plain text"] = new StringContent("""{"state":"disabled"}""", Encoding.UTF8, "text/plain"),
             ["no JSON"] = new StringContent("", Encoding.UTF8, "application/json"),
-            ["broken JSON"] = new StringContent("""{"enabled":""", Encoding.UTF8, "application/json"),
+            ["broken JSON"] = new StringContent("""{"state":""", Encoding.UTF8, "application/json"),
             ["null"] = new StringContent("null", Encoding.UTF8, "application/json"),
-            ["an array"] = new StringContent("""[false]""", Encoding.UTF8, "application/json"),
-            ["enabled as a string"] = new StringContent("""{"enabled":"false"}""", Encoding.UTF8, "application/json"),
+            ["an array"] = new StringContent("""["disabled"]""", Encoding.UTF8, "application/json"),
+            ["state as a boolean"] = new StringContent("""{"state":false}""", Encoding.UTF8, "application/json"),
+            ["state as a number"] = new StringContent("""{"state":2}""", Encoding.UTF8, "application/json"),
             ["name as a number"] = new StringContent("""{"name":5}""", Encoding.UTF8, "application/json"),
         };
 
@@ -436,11 +458,44 @@ public sealed class TrackApiTests
         Assert.Equal(
             changes.Keys.ToDictionary(
                 kind => kind,
-                _ => (HttpStatusCode.BadRequest, (string?)"A change is a JSON object of name, enabled or both.")
+                _ => (HttpStatusCode.BadRequest, (string?)"A change is a JSON object of name, state or both.")
             ),
             answers
         );
-        Assert.Equal(["Rain.m4a"], harness.AmbientFiles("enabled"));
+        Assert.Equal(["enabled/Rain.m4a"], Placed(harness));
+    }
+
+    [Fact]
+    public async Task A_change_to_a_state_other_than_ambient_occasional_or_disabled_answers_400_and_changes_nothing()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var token = harness.UserToken();
+        using var uploaded = await harness.UploadTrackAsync(token, "Rain", await Tracks.RecordingAsync("m4a", Length));
+        var changes = new Dictionary<string, object>
+        {
+            ["enabled"] = new { state = "enabled" },
+            ["a code in another case"] = new { state = "Occasional" },
+            ["a code padded"] = new { state = " disabled" },
+            ["an empty code"] = new { state = "" },
+            ["another word"] = new { state = "random" },
+            ["with a rename"] = new { name = "Snow", state = "on" },
+        };
+
+        var answers = new Dictionary<string, (HttpStatusCode, string?)>();
+        foreach (var (kind, change) in changes)
+        {
+            using var response = await harness.ChangeTrackAsync(token, "Rain", change);
+            answers[kind] = (response.StatusCode, await TrackApi.ReadProblemDetailAsync(response));
+        }
+
+        Assert.Equal(
+            changes.Keys.ToDictionary(
+                kind => kind,
+                _ => (HttpStatusCode.BadRequest, (string?)"A track's state is ambient, occasional or disabled.")
+            ),
+            answers
+        );
+        Assert.Equal(["enabled/Rain.m4a"], Placed(harness));
     }
 
     [Fact]
@@ -466,7 +521,7 @@ public sealed class TrackApiTests
         var token = harness.UserToken();
         using var uploaded = await harness.UploadTrackAsync(token, "Rain", await Tracks.RecordingAsync("m4a", Length));
 
-        using var changed = await harness.ChangeTrackAsync(token, "Hail", new { enabled = false });
+        using var changed = await harness.ChangeTrackAsync(token, "Hail", new { state = "disabled" });
         using var deleted = await harness.DeleteTrackAsync(token, "Hail");
         using var audio = await harness.GetTrackAudioAsync(token, "Hail");
 
@@ -491,7 +546,7 @@ public sealed class TrackApiTests
         using var uploaded = await harness.UploadTrackAsync(token, "Rain", recording);
         // A disabled track is played on the phone too.
         using var uploadedSnow = await harness.UploadTrackAsync(token, "Snow", recording);
-        using var disabledSnow = await harness.ChangeTrackAsync(token, "Snow", new { enabled = false });
+        using var disabledSnow = await harness.ChangeTrackAsync(token, "Snow", new { state = "disabled" });
 
         using var whole = await harness.GetTrackAudioAsync(token, "Rain");
         using var part = await harness.GetTrackAudioAsync(token, "Rain", new RangeHeaderValue(100, 199));
@@ -520,7 +575,7 @@ public sealed class TrackApiTests
 
         using var uploaded = await harness.UploadTrackAsync(token, name, recording);
         using var audio = await harness.GetTrackAudioAsync(token, name.ToUpperInvariant());
-        using var disabled = await harness.ChangeTrackAsync(token, name, new { enabled = false });
+        using var disabled = await harness.ChangeTrackAsync(token, name, new { state = "disabled" });
         var afterDisable = harness.AmbientFiles("disabled");
         using var deleted = await harness.DeleteTrackAsync(token, name.ToLowerInvariant());
 
@@ -536,11 +591,17 @@ public sealed class TrackApiTests
         Assert.Empty(harness.AmbientFiles("disabled"));
     }
 
-    private static async Task<(string Name, bool Enabled, double Duration)> ReadTrackAsync(HttpResponseMessage response)
+    private static async Task<(string Name, string State, double Duration)> ReadTrackAsync(HttpResponseMessage response)
     {
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return TrackApi.ReadTrack(await response.Content.ReadFromJsonAsync<JsonNode>(Cancellation));
     }
+
+    // Every file of the three track folders, as its folder and its name.
+    private static string[] Placed(ServerHarness harness) =>
+        new[] { "enabled", "occasional", "disabled" }
+            .SelectMany(folder => harness.AmbientFiles(folder).Select(file => $"{folder}/{file}"))
+            .ToArray();
 
     private static void AssertLasts(TimeSpan expected, double seconds) =>
         Assert.InRange(seconds, expected.TotalSeconds - 0.1, expected.TotalSeconds + 0.1);

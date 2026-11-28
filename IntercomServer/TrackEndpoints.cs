@@ -8,14 +8,21 @@ using Microsoft.Net.Http.Headers;
 
 namespace IntercomServer;
 
-/// <summary>A track as the API answers it, its <paramref name="Duration"/> in seconds.</summary>
-internal sealed record TrackAnswer(string Name, bool Enabled, double Duration)
+/// <summary>
+/// A track as the API answers it, its <paramref name="State"/> by its code
+/// (<see cref="TrackEndpoints.StateCodes"/>) and its <paramref name="Duration"/> in seconds.
+/// </summary>
+internal sealed record TrackAnswer(string Name, string State, double Duration)
 {
-    public static TrackAnswer Of(Track track) => new(track.Name, track.Enabled, track.Duration.TotalSeconds);
+    public static TrackAnswer Of(Track track) =>
+        new(track.Name, TrackEndpoints.StateCodes[track.State], track.Duration.TotalSeconds);
 }
 
-/// <summary>A change of a track: its new name, enabled or not, or both; either left out stays as it is.</summary>
-internal sealed record TrackChange(string? Name, bool? Enabled);
+/// <summary>
+/// A change of a track: its new name, its new state by its code, or both; either left out stays
+/// as it is.
+/// </summary>
+internal sealed record TrackChange(string? Name, string? State);
 
 /// <summary>
 /// The ambient tracks of <see cref="TrackStore"/>, under <c>/api/ambient-tracks</c>, for the
@@ -29,7 +36,23 @@ internal static class TrackEndpoints
 
     private const string UploadShape = "An upload is a multipart form of name, then file.";
 
-    private const string ChangeShape = "A change is a JSON object of name, enabled or both.";
+    private const string ChangeShape = "A change is a JSON object of name, state or both.";
+
+    private const string StateShape = "A track's state is ambient, occasional or disabled.";
+
+    /// <summary>The code a track's <c>state</c> names each <see cref="TrackState"/> by.</summary>
+    public static readonly IReadOnlyDictionary<TrackState, string> StateCodes = new Dictionary<TrackState, string>
+    {
+        [TrackState.Ambient] = "ambient",
+        [TrackState.Occasional] = "occasional",
+        [TrackState.Disabled] = "disabled",
+    };
+
+    private static readonly Dictionary<string, TrackState> States = StateCodes.ToDictionary(
+        code => code.Value,
+        code => code.Key,
+        StringComparer.Ordinal
+    );
 
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
@@ -103,7 +126,15 @@ internal static class TrackEndpoints
         if (change == null)
             return BadRequest(ChangeShape);
 
-        var result = await tracks.UpdateAsync(name, change.Name, change.Enabled, cancellationToken);
+        TrackState? state = null;
+        if (change.State != null)
+        {
+            if (!States.TryGetValue(change.State, out var known))
+                return BadRequest(StateShape);
+            state = known;
+        }
+
+        var result = await tracks.UpdateAsync(name, change.Name, state, cancellationToken);
         return result.Track is { } track ? Results.Ok(TrackAnswer.Of(track)) : Refused(result);
     }
 

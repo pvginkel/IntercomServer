@@ -5,10 +5,11 @@ using Microsoft.Extensions.DependencyInjection;
 namespace IntercomServer.Tests;
 
 /// <summary>
-/// The track store: the ambient tracks are files under <c>&lt;DATA_DIR&gt;/ambient/enabled</c> and
-/// <c>disabled</c>, each named by its file name without its extension, unique across both
-/// folders ignoring case and extension. An upload is written under <c>.incoming</c>, probed with
-/// ffprobe and only then renamed into <c>enabled/</c>; rename, enable, disable and delete move or
+/// The track store: the ambient tracks are files under <c>&lt;DATA_DIR&gt;/ambient</c>, in the
+/// folder of their state, <c>enabled</c> for Ambient, <c>occasional</c> and <c>disabled</c>, each
+/// named by its file name without its extension, unique across the three folders ignoring case
+/// and extension. An upload is written under <c>.incoming</c>, probed with ffprobe and only then
+/// renamed into <c>enabled/</c>, an Ambient track; rename, a change of state and delete move or
 /// remove the file. The files are real ones FFmpeg makes, and ffprobe reads them.
 /// </summary>
 public sealed class TrackStoreTests
@@ -22,7 +23,7 @@ public sealed class TrackStoreTests
     [InlineData("mp3")]
     [InlineData("wav")]
     [InlineData("webm")]
-    public async Task An_upload_is_an_enabled_track_in_a_file_of_its_name_and_its_formats_extension(string format)
+    public async Task An_upload_is_an_Ambient_track_in_a_file_of_its_name_and_its_formats_extension(string format)
     {
         await using var harness = await ServerHarness.StartAsync();
         var recording = await Tracks.RecordingAsync(format, Length);
@@ -31,7 +32,7 @@ public sealed class TrackStoreTests
 
         var track = Assert.IsType<Track>(result.Track);
         Assert.Equal("Rain on the skylight", track.Name);
-        Assert.True(track.Enabled);
+        Assert.Equal(TrackState.Ambient, track.State);
         AssertLasts(Length, track.Duration);
         Assert.Equal([$"Rain on the skylight.{format}"], harness.AmbientFiles("enabled"));
         Assert.Equal(recording, await File.ReadAllBytesAsync(track.Path, Cancellation));
@@ -167,21 +168,27 @@ public sealed class TrackStoreTests
     }
 
     [Fact]
-    public async Task A_name_a_track_in_either_folder_has_ignoring_case_and_extension_is_refused()
+    public async Task A_name_a_track_in_any_folder_has_ignoring_case_and_extension_is_refused()
     {
         await using var harness = await ServerHarness.StartAsync();
         await harness.UploadAsync("Rain", await Tracks.RecordingAsync("m4a", Length));
         await harness.UploadAsync("Snow", await Tracks.RecordingAsync("wav", Length));
-        await harness.TrackStore().UpdateAsync("Snow", null, enabled: false, Cancellation);
+        await harness.UploadAsync("Hail", await Tracks.RecordingAsync("mp3", Length));
+        await harness.TrackStore().UpdateAsync("Snow", null, TrackState.Disabled, Cancellation);
+        await harness.TrackStore().UpdateAsync("Hail", null, TrackState.Occasional, Cancellation);
 
-        var enabledTaken = await harness.UploadAsync("RAIN", await Tracks.RecordingAsync("mp3", Length));
+        var ambientTaken = await harness.UploadAsync("RAIN", await Tracks.RecordingAsync("mp3", Length));
         var disabledTaken = await harness.UploadAsync("snow", await Tracks.RecordingAsync("m4a", Length));
+        var occasionalTaken = await harness.UploadAsync("hAIL", await Tracks.RecordingAsync("wav", Length));
 
-        Assert.Equal(TrackRefusal.NameTaken, enabledTaken.Refusal);
-        Assert.Equal("The name 'RAIN' is taken, by enabled/Rain.m4a.", enabledTaken.Detail);
+        Assert.Equal(TrackRefusal.NameTaken, ambientTaken.Refusal);
+        Assert.Equal("The name 'RAIN' is taken, by enabled/Rain.m4a.", ambientTaken.Detail);
         Assert.Equal(TrackRefusal.NameTaken, disabledTaken.Refusal);
+        Assert.Equal(TrackRefusal.NameTaken, occasionalTaken.Refusal);
+        Assert.Equal("The name 'hAIL' is taken, by occasional/Hail.mp3.", occasionalTaken.Detail);
         Assert.Equal(["Rain.m4a"], harness.AmbientFiles("enabled"));
         Assert.Equal(["Snow.wav"], harness.AmbientFiles("disabled"));
+        Assert.Equal(["Hail.mp3"], harness.AmbientFiles("occasional"));
         Assert.Empty(harness.AmbientFiles(".incoming"));
     }
 
@@ -267,21 +274,23 @@ public sealed class TrackStoreTests
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task A_rename_renames_the_file_in_its_folder(bool enabled)
+    [InlineData(nameof(TrackState.Ambient))]
+    [InlineData(nameof(TrackState.Occasional))]
+    [InlineData(nameof(TrackState.Disabled))]
+    public async Task A_rename_renames_the_file_in_its_folder(string stateName)
     {
+        var state = Enum.Parse<TrackState>(stateName);
         await using var harness = await ServerHarness.StartAsync();
         var recording = await Tracks.RecordingAsync("m4a", Length);
         await harness.UploadAsync("Rain", recording);
-        await harness.TrackStore().UpdateAsync("Rain", null, enabled, Cancellation);
-        var folder = enabled ? "enabled" : "disabled";
+        await harness.TrackStore().UpdateAsync("Rain", null, state, Cancellation);
+        var folder = Folder(state);
 
         var result = await harness.TrackStore().UpdateAsync("Rain", "Rain on the skylight", null, Cancellation);
 
         var track = Assert.IsType<Track>(result.Track);
         Assert.Equal("Rain on the skylight", track.Name);
-        Assert.Equal(enabled, track.Enabled);
+        Assert.Equal(state, track.State);
         Assert.Equal(Path.Combine(harness.AmbientDirectory(), folder, "Rain on the skylight.m4a"), track.Path);
         Assert.Equal(["Rain on the skylight.m4a"], harness.AmbientFiles(folder));
         Assert.Equal(recording, await File.ReadAllBytesAsync(track.Path, Cancellation));
@@ -295,10 +304,10 @@ public sealed class TrackStoreTests
         await using var harness = await ServerHarness.StartAsync();
         await harness.UploadAsync("Rain", await Tracks.RecordingAsync("m4a", Length));
         await harness.UploadAsync("Snow", await Tracks.RecordingAsync("wav", Length));
-        await harness.TrackStore().UpdateAsync("Snow", null, enabled: false, Cancellation);
+        await harness.TrackStore().UpdateAsync("Snow", null, TrackState.Disabled, Cancellation);
 
-        var taken = await harness.TrackStore().UpdateAsync("Rain", "SNOW", enabled: false, Cancellation);
-        var broken = await harness.TrackStore().UpdateAsync("Rain", "Rain/Snow", enabled: false, Cancellation);
+        var taken = await harness.TrackStore().UpdateAsync("Rain", "SNOW", TrackState.Disabled, Cancellation);
+        var broken = await harness.TrackStore().UpdateAsync("Rain", "Rain/Snow", TrackState.Occasional, Cancellation);
 
         Assert.Equal(TrackRefusal.NameTaken, taken.Refusal);
         Assert.Equal("The name 'SNOW' is taken, by disabled/Snow.wav.", taken.Detail);
@@ -306,6 +315,7 @@ public sealed class TrackStoreTests
         Assert.Equal("A track's name cannot hold '/'.", broken.Detail);
         Assert.Equal(["Rain.m4a"], harness.AmbientFiles("enabled"));
         Assert.Equal(["Snow.wav"], harness.AmbientFiles("disabled"));
+        Assert.Empty(harness.AmbientFiles("occasional"));
     }
 
     [Fact]
@@ -321,30 +331,37 @@ public sealed class TrackStoreTests
     }
 
     [Fact]
-    public async Task Disabling_moves_the_file_to_disabled_and_enabling_moves_it_back()
+    public async Task A_change_of_state_moves_the_file_between_any_two_of_the_three_folders()
     {
         await using var harness = await ServerHarness.StartAsync();
         var recording = await Tracks.RecordingAsync("m4a", Length);
         await harness.UploadAsync("Rain", recording);
         var store = harness.TrackStore();
+        // Each of the six moves from one state to another, once.
+        TrackState[] states =
+        [
+            TrackState.Occasional,
+            TrackState.Disabled,
+            TrackState.Ambient,
+            TrackState.Disabled,
+            TrackState.Occasional,
+            TrackState.Ambient,
+        ];
 
-        var disabled = await store.UpdateAsync("Rain", null, enabled: false, Cancellation);
-        var enabledFilesDisabled = harness.AmbientFiles("enabled");
-        var disabledFilesDisabled = harness.AmbientFiles("disabled");
-        var listedDisabled = await store.ListAsync(Cancellation);
-        var disabledAgain = await store.UpdateAsync("Rain", null, enabled: false, Cancellation);
-        var enabled = await store.UpdateAsync("Rain", null, enabled: true, Cancellation);
+        foreach (var state in states)
+        {
+            var moved = await store.UpdateAsync("Rain", null, state, Cancellation);
+            var placed = Placed(harness);
+            var listed = await store.ListAsync(Cancellation);
+            var again = await store.UpdateAsync("Rain", null, state, Cancellation);
 
-        Assert.False(disabled.Track?.Enabled);
-        Assert.Empty(enabledFilesDisabled);
-        Assert.Equal(["Rain.m4a"], disabledFilesDisabled);
-        Assert.Equal(disabled.Track, Assert.Single(listedDisabled));
-        Assert.Equal(disabled.Track, disabledAgain.Track);
-        Assert.True(enabled.Track?.Enabled);
-        Assert.Equal(["Rain.m4a"], harness.AmbientFiles("enabled"));
-        Assert.Empty(harness.AmbientFiles("disabled"));
-        Assert.Equal(recording, await File.ReadAllBytesAsync(enabled.Track!.Path, Cancellation));
-        Assert.Equal(enabled.Track, Assert.Single(await store.ListAsync(Cancellation)));
+            Assert.Equal(state, moved.Track?.State);
+            Assert.Equal(Path.Combine(harness.AmbientDirectory(), Folder(state), "Rain.m4a"), moved.Track?.Path);
+            Assert.Equal([$"{Folder(state)}/Rain.m4a"], placed);
+            Assert.Equal(moved.Track, Assert.Single(listed));
+            Assert.Equal(moved.Track, again.Track);
+            Assert.Equal(recording, await File.ReadAllBytesAsync(moved.Track!.Path, Cancellation));
+        }
     }
 
     [Fact]
@@ -353,28 +370,32 @@ public sealed class TrackStoreTests
         await using var harness = await ServerHarness.StartAsync();
         await harness.UploadAsync("Rain", await Tracks.RecordingAsync("m4a", Length));
 
-        var result = await harness.TrackStore().UpdateAsync("Rain", "Rain on the skylight", false, Cancellation);
+        var result = await harness.TrackStore().UpdateAsync("Rain", "Rain on the skylight", TrackState.Disabled, Cancellation);
 
-        Assert.Equal(("Rain on the skylight", false), (result.Track?.Name, result.Track?.Enabled));
+        Assert.Equal(("Rain on the skylight", TrackState.Disabled), (result.Track?.Name, result.Track?.State));
         Assert.Empty(harness.AmbientFiles("enabled"));
         Assert.Equal(["Rain on the skylight.m4a"], harness.AmbientFiles("disabled"));
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Deleting_removes_the_file(bool enabled)
+    [InlineData(nameof(TrackState.Ambient))]
+    [InlineData(nameof(TrackState.Occasional))]
+    [InlineData(nameof(TrackState.Disabled))]
+    public async Task Deleting_removes_the_file(string stateName)
     {
+        var state = Enum.Parse<TrackState>(stateName);
         await using var harness = await ServerHarness.StartAsync();
         await harness.UploadAsync("Rain", await Tracks.RecordingAsync("m4a", Length));
         var snow = await harness.UploadAsync("Snow", await Tracks.RecordingAsync("wav", Length));
-        await harness.TrackStore().UpdateAsync("Rain", null, enabled, Cancellation);
+        await harness.TrackStore().UpdateAsync("Rain", null, state, Cancellation);
 
         var result = await harness.TrackStore().DeleteAsync("Rain", Cancellation);
 
         Assert.Equal("Rain", result.Track?.Name);
+        Assert.Equal(state, result.Track?.State);
         Assert.False(File.Exists(result.Track!.Path));
         Assert.Equal(["Snow.wav"], harness.AmbientFiles("enabled"));
+        Assert.Empty(harness.AmbientFiles("occasional"));
         Assert.Empty(harness.AmbientFiles("disabled"));
         Assert.Equal(snow.Track, Assert.Single(await harness.TrackStore().ListAsync(Cancellation)));
     }
@@ -385,7 +406,7 @@ public sealed class TrackStoreTests
         await using var harness = await ServerHarness.StartAsync();
         await harness.UploadAsync("Rain", await Tracks.RecordingAsync("m4a", Length));
 
-        var changed = await harness.TrackStore().UpdateAsync("Snow", "Hail", false, Cancellation);
+        var changed = await harness.TrackStore().UpdateAsync("Snow", "Hail", TrackState.Disabled, Cancellation);
         var deleted = await harness.TrackStore().DeleteAsync("Snow", Cancellation);
 
         Assert.Equal(TrackRefusal.NotFound, changed.Refusal);
@@ -403,7 +424,7 @@ public sealed class TrackStoreTests
 
         var found = Assert.NotNull(await harness.TrackStore().OpenAsync("rAIN", Cancellation));
         await using var audio = found.Audio;
-        var disabled = await harness.TrackStore().UpdateAsync("rain", null, false, Cancellation);
+        var disabled = await harness.TrackStore().UpdateAsync("rain", null, TrackState.Disabled, Cancellation);
         var deleted = await harness.TrackStore().DeleteAsync("SNOW", Cancellation);
 
         Assert.Equal(rain.Track, found.Track);
@@ -422,7 +443,7 @@ public sealed class TrackStoreTests
 
         var opened = Assert.NotNull(await harness.TrackStore().OpenAsync("Rain", Cancellation));
         await using var audio = opened.Audio;
-        var changed = await harness.TrackStore().UpdateAsync("Rain", "Snow", false, Cancellation);
+        var changed = await harness.TrackStore().UpdateAsync("Rain", "Snow", TrackState.Disabled, Cancellation);
         var deleted = await harness.TrackStore().DeleteAsync("Snow", Cancellation);
         using var read = new MemoryStream();
         await audio.CopyToAsync(read, Cancellation);
@@ -436,20 +457,27 @@ public sealed class TrackStoreTests
     }
 
     [Fact]
-    public async Task The_list_holds_both_folders_sorted_by_name_ignoring_case()
+    public async Task The_list_holds_the_three_folders_sorted_by_name_ignoring_case()
     {
         await using var harness = await ServerHarness.StartAsync();
         var recording = await Tracks.RecordingAsync("wav", Length);
         await harness.UploadAsync("cherry", recording);
         await harness.UploadAsync("Banana", recording);
         await harness.UploadAsync("apple", recording);
-        await harness.TrackStore().UpdateAsync("Banana", null, false, Cancellation);
+        await harness.UploadAsync("date", recording);
+        await harness.TrackStore().UpdateAsync("Banana", null, TrackState.Disabled, Cancellation);
+        await harness.TrackStore().UpdateAsync("cherry", null, TrackState.Occasional, Cancellation);
 
         var tracks = await harness.TrackStore().ListAsync(Cancellation);
 
         Assert.Equal(
-            [("apple", true), ("Banana", false), ("cherry", true)],
-            tracks.Select(track => (track.Name, track.Enabled))
+            [
+                ("apple", TrackState.Ambient),
+                ("Banana", TrackState.Disabled),
+                ("cherry", TrackState.Occasional),
+                ("date", TrackState.Ambient),
+            ],
+            tracks.Select(track => (track.Name, track.State))
         );
     }
 
@@ -477,26 +505,39 @@ public sealed class TrackStoreTests
         await using var harness = await ServerHarness.StartAsync();
         var recording = await Tracks.RecordingAsync("m4a", Length);
         var enabled = Path.Combine(harness.AmbientDirectory(), "enabled");
+        var occasional = Path.Combine(harness.AmbientDirectory(), "occasional");
         var disabled = Path.Combine(harness.AmbientDirectory(), "disabled");
         await File.WriteAllBytesAsync(Path.Combine(enabled, "Rain.m4a"), recording, Cancellation);
+        await File.WriteAllBytesAsync(Path.Combine(occasional, "Hail.m4a"), recording, Cancellation);
         await File.WriteAllBytesAsync(Path.Combine(disabled, "Snow.m4a"), recording, Cancellation);
         await File.WriteAllBytesAsync(Path.Combine(enabled, "Notes.txt"), Tracks.Noise(), Cancellation);
+        await File.WriteAllBytesAsync(Path.Combine(occasional, "Readme.txt"), Tracks.Noise(), Cancellation);
         await File.WriteAllBytesAsync(Path.Combine(disabled, "Video.mp4"), await Tracks.VideoAsync(), Cancellation);
         await File.WriteAllBytesAsync(Path.Combine(enabled, ".Hidden.m4a"), recording, Cancellation);
         await File.WriteAllBytesAsync(Path.Combine(enabled, "Twin.m4a"), recording, Cancellation);
         await File.WriteAllBytesAsync(Path.Combine(disabled, "twin.wav"), await Tracks.RecordingAsync("wav", Length), Cancellation);
+        await File.WriteAllBytesAsync(Path.Combine(occasional, "Sleet.m4a"), recording, Cancellation);
+        await File.WriteAllBytesAsync(Path.Combine(enabled, "SLEET.wav"), await Tracks.RecordingAsync("wav", Length), Cancellation);
 
         var tracks = await harness.TrackStore().ListAsync(Cancellation);
         var twin = await harness.TrackStore().OpenAsync("Twin", Cancellation);
+        var sleet = await harness.TrackStore().OpenAsync("Sleet", Cancellation);
         var notes = await harness.TrackStore().DeleteAsync("Notes", Cancellation);
         var taken = await harness.UploadAsync("notes", recording);
+        var readmeTaken = await harness.UploadAsync("README", recording);
 
-        Assert.Equal([("Rain", true), ("Snow", false)], tracks.Select(track => (track.Name, track.Enabled)));
+        Assert.Equal(
+            [("Hail", TrackState.Occasional), ("Rain", TrackState.Ambient), ("Snow", TrackState.Disabled)],
+            tracks.Select(track => (track.Name, track.State))
+        );
         Assert.Null(twin);
+        Assert.Null(sleet);
         Assert.Equal(TrackRefusal.NotFound, notes.Refusal);
         // Its name is taken on disk, track or not.
         Assert.Equal(TrackRefusal.NameTaken, taken.Refusal);
-        Assert.Equal([".Hidden.m4a", "Notes.txt", "Rain.m4a", "Twin.m4a"], harness.AmbientFiles("enabled"));
+        Assert.Equal(TrackRefusal.NameTaken, readmeTaken.Refusal);
+        Assert.Equal([".Hidden.m4a", "Notes.txt", "Rain.m4a", "SLEET.wav", "Twin.m4a"], harness.AmbientFiles("enabled"));
+        Assert.Equal(["Hail.m4a", "Readme.txt", "Sleet.m4a"], harness.AmbientFiles("occasional"));
     }
 
     [Fact]
@@ -544,6 +585,36 @@ public sealed class TrackStoreTests
         }
     }
 
+    [Fact]
+    public async Task The_start_creates_the_occasional_folder_beside_a_volumes_enabled_and_disabled_ones_and_moves_no_file()
+    {
+        var dataDirectory = Directory.CreateTempSubdirectory("intercom-server-tests-").FullName;
+        try
+        {
+            var enabled = Directory.CreateDirectory(Path.Combine(dataDirectory, "ambient", "enabled")).FullName;
+            var disabled = Directory.CreateDirectory(Path.Combine(dataDirectory, "ambient", "disabled")).FullName;
+            var recording = await Tracks.RecordingAsync("m4a", Length);
+            await File.WriteAllBytesAsync(Path.Combine(enabled, "Rain.m4a"), recording, Cancellation);
+            await File.WriteAllBytesAsync(Path.Combine(disabled, "Snow.m4a"), recording, Cancellation);
+
+            await using var harness = await ServerHarness.StartAsync(
+                new Dictionary<string, string?> { ["DATA_DIR"] = dataDirectory }
+            );
+
+            Assert.Equal(
+                [("Rain", TrackState.Ambient), ("Snow", TrackState.Disabled)],
+                (await harness.TrackStore().ListAsync(Cancellation)).Select(track => (track.Name, track.State))
+            );
+            Assert.Equal([Path.Combine(enabled, "Rain.m4a")], Directory.GetFiles(enabled));
+            Assert.Empty(Directory.GetFiles(Path.Combine(dataDirectory, "ambient", "occasional")));
+            Assert.Equal([Path.Combine(disabled, "Snow.m4a")], Directory.GetFiles(disabled));
+        }
+        finally
+        {
+            Directory.Delete(dataDirectory, recursive: true);
+        }
+    }
+
     // The web host takes requests before the store's start runs.
     [Fact]
     public async Task The_start_leaves_an_upload_of_its_own_process_in_progress()
@@ -574,6 +645,21 @@ public sealed class TrackStoreTests
         Assert.StartsWith("ffprobe is missing: ", error.Message);
         Assert.Contains($"'{missing}' could not be started", error.Message);
     }
+
+    // Every file of the three folders, as its folder and its name.
+    private static string[] Placed(ServerHarness harness) =>
+        Enum.GetValues<TrackState>()
+            .SelectMany(state => harness.AmbientFiles(Folder(state)).Select(file => $"{Folder(state)}/{file}"))
+            .ToArray();
+
+    private static string Folder(TrackState state) =>
+        state switch
+        {
+            TrackState.Ambient => "enabled",
+            TrackState.Occasional => "occasional",
+            TrackState.Disabled => "disabled",
+            _ => throw new ArgumentOutOfRangeException(nameof(state)),
+        };
 
     // ffprobe reads an encoder's padding as part of a file's length, tens of milliseconds.
     private static void AssertLasts(TimeSpan expected, TimeSpan duration) =>

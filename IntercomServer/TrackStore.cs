@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Hosting;
 using Serilog;
@@ -6,10 +7,26 @@ using Serilog;
 namespace IntercomServer;
 
 /// <summary>
-/// An ambient track: a file in the store's <c>enabled/</c> or <c>disabled/</c> folder, named by
-/// its file name without its extension, lasting <paramref name="Duration"/> as ffprobe reads it.
+/// A track's state, kept as the folder its file is in. A start of ambient sound that names no
+/// track picks among the <see cref="Ambient"/> ones; one that names a track plays it in any state.
 /// </summary>
-internal sealed record Track(string Name, bool Enabled, TimeSpan Duration, string Path);
+internal enum TrackState
+{
+    /// <summary>In the folder <c>enabled/</c>.</summary>
+    Ambient,
+
+    /// <summary>In the folder <c>occasional/</c>.</summary>
+    Occasional,
+
+    /// <summary>In the folder <c>disabled/</c>.</summary>
+    Disabled,
+}
+
+/// <summary>
+/// An ambient track: a file in the store's folder of its <paramref name="State"/>, named by its
+/// file name without its extension, lasting <paramref name="Duration"/> as ffprobe reads it.
+/// </summary>
+internal sealed record Track(string Name, TrackState State, TimeSpan Duration, string Path);
 
 /// <summary>Why the store refused an upload, a change or a delete.</summary>
 internal enum TrackRefusal
@@ -20,7 +37,7 @@ internal enum TrackRefusal
     /// <summary>No track has the name.</summary>
     NotFound,
 
-    /// <summary>A file in either folder has the name, ignoring case and extension.</summary>
+    /// <summary>A file in any of the folders has the name, ignoring case and extension.</summary>
     NameTaken,
 
     /// <summary>ffprobe finds no audio the server can play in the file.</summary>
@@ -45,14 +62,14 @@ internal sealed record TrackResult(Track? Track, TrackRefusal? Refusal, string? 
 }
 
 /// <summary>
-/// The ambient tracks, files under <c>&lt;DATA_DIR&gt;/ambient</c>: <c>enabled/</c>,
-/// <c>disabled/</c>, and uploads in progress under <c>.incoming/</c>. A name is 1 to
-/// <see cref="MaxNameLength"/> characters, with none of <c>/ \ : * ? " &lt; &gt; |</c>, no control
-/// characters and no leading or trailing space or dot, and unique across both folders, ignoring
-/// case and extension. Rename, enable, disable and delete run under one lock, with the list and
-/// the last step of an upload. A file of the folders is a track only when its name keeps the rules,
-/// no other file has it, and ffprobe reads audio in it: the folders are the data volume's, which
-/// the operator can write by hand.
+/// The ambient tracks, files under <c>&lt;DATA_DIR&gt;/ambient</c>, in the folder of their
+/// <see cref="TrackState"/>: <c>enabled/</c>, <c>occasional/</c> and <c>disabled/</c>; and uploads
+/// in progress under <c>.incoming/</c>. A name is 1 to <see cref="MaxNameLength"/> characters, with
+/// none of <c>/ \ : * ? " &lt; &gt; |</c>, no control characters and no leading or trailing space or
+/// dot, and unique across the three folders, ignoring case and extension. Rename, a change of
+/// state and delete run under one lock, with the list and the last step of an upload. A file of
+/// the folders is a track only when its name keeps the rules, no other file has it, and ffprobe
+/// reads audio in it: the folders are the data volume's, which the operator can write by hand.
 /// </summary>
 internal sealed class TrackStore(DataConfiguration data, TrackConfiguration configuration, AudioProbe probe)
     : IHostedService
@@ -77,10 +94,6 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
     private Dictionary<string, (DateTime Modified, Probed Probed)> _probed = new();
     private HashSet<string> _leftOut = new();
 
-    private string EnabledDirectory => Path.Combine(_directory, "enabled");
-
-    private string DisabledDirectory => Path.Combine(_directory, "disabled");
-
     private string IncomingDirectory => Path.Combine(_directory, ".incoming");
 
     /// <summary>
@@ -92,8 +105,8 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
     {
         var version = await probe.VersionAsync(cancellationToken);
 
-        Directory.CreateDirectory(EnabledDirectory);
-        Directory.CreateDirectory(DisabledDirectory);
+        foreach (var state in Enum.GetValues<TrackState>())
+            Directory.CreateDirectory(FolderOf(state));
         Directory.CreateDirectory(IncomingDirectory);
 
         var unfinished = Directory
@@ -168,7 +181,7 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
     }
 
     /// <summary>
-    /// Adds <paramref name="content"/> as an enabled track named <paramref name="name"/>, in the
+    /// Adds <paramref name="content"/> as an Ambient track named <paramref name="name"/>, in the
     /// extension its format is named by. It is written under <c>.incoming</c>, probed, and only
     /// then renamed into <c>enabled/</c>, so a half-written upload is never a track.
     /// </summary>
@@ -208,7 +221,7 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
                 if (Holder(name, except: null) is { } holder)
                     return Taken(name, holder);
 
-                var path = Path.Combine(EnabledDirectory, $"{name}.{audio.Extension}");
+                var path = Path.Combine(FolderOf(TrackState.Ambient), $"{name}.{audio.Extension}");
                 File.Move(staged, path);
                 _probed[path] = (File.GetLastWriteTimeUtc(path), audio);
 
@@ -218,7 +231,7 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
                     Seconds(audio.Duration)
                 );
 
-                return TrackResult.Done(new Track(name, true, audio.Duration, path));
+                return TrackResult.Done(new Track(name, TrackState.Ambient, audio.Duration, path));
             }
             finally
             {
@@ -233,13 +246,13 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
 
     /// <summary>
     /// Renames the track named <paramref name="name"/> to <paramref name="rename"/>, a rename in its
-    /// folder, and moves it to <c>enabled/</c> or <c>disabled/</c> as <paramref name="enabled"/>
-    /// says; either left null is left as it is.
+    /// folder, and moves it to the folder of <paramref name="state"/>; either left null is left as
+    /// it is.
     /// </summary>
     public async Task<TrackResult> UpdateAsync(
         string name,
         string? rename,
-        bool? enabled,
+        TrackState? state,
         CancellationToken cancellationToken
     )
     {
@@ -256,11 +269,8 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
                 return Taken(rename, holder);
 
             var newName = rename ?? track.Name;
-            var nowEnabled = enabled ?? track.Enabled;
-            var path = Path.Combine(
-                nowEnabled ? EnabledDirectory : DisabledDirectory,
-                newName + Path.GetExtension(track.Path)
-            );
+            var newState = state ?? track.State;
+            var path = Path.Combine(FolderOf(newState), newName + Path.GetExtension(track.Path));
 
             if (path != track.Path)
             {
@@ -275,7 +285,7 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
                 );
             }
 
-            return TrackResult.Done(track with { Name = newName, Enabled = nowEnabled, Path = path });
+            return TrackResult.Done(track with { Name = newName, State = newState, Path = path });
         }
         finally
         {
@@ -321,7 +331,7 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
                 continue;
             }
 
-            var (path, name, enabled) = named.Single();
+            var (path, name, state) = named.Single();
             if (BrokenNameRule(name) is { } broken)
             {
                 LeaveOut(path, broken);
@@ -338,7 +348,7 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
             switch (found)
             {
                 case ProbedAudio audio:
-                    tracks.Add(new Track(name, enabled, audio.Duration, path));
+                    tracks.Add(new Track(name, state, audio.Duration, path));
                     break;
                 case NotAudio notAudio:
                     LeaveOut(path, NotAudioDetail(notAudio));
@@ -359,18 +369,29 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
         }
     }
 
-    // Every file of the two folders, named as the track it would be.
-    private IEnumerable<(string Path, string Name, bool Enabled)> Files() =>
-        Directory
-            .EnumerateFiles(EnabledDirectory)
-            .Select(path => (path, Path.GetFileNameWithoutExtension(path), true))
-            .Concat(
+    // Every file of the three folders, named as the track it would be, in the state of its folder.
+    private IEnumerable<(string Path, string Name, TrackState State)> Files() =>
+        Enum.GetValues<TrackState>()
+            .SelectMany(state =>
                 Directory
-                    .EnumerateFiles(DisabledDirectory)
-                    .Select(path => (path, Path.GetFileNameWithoutExtension(path), false))
+                    .EnumerateFiles(FolderOf(state))
+                    .Select(path => (path, Path.GetFileNameWithoutExtension(path), state))
             );
 
-    // Under the lock: the file of either folder, track or not, whose name is name, ignoring case
+    // Each state's folder. The data volume keeps the Ambient tracks in enabled/.
+    private string FolderOf(TrackState state) =>
+        Path.Combine(
+            _directory,
+            state switch
+            {
+                TrackState.Ambient => "enabled",
+                TrackState.Occasional => "occasional",
+                TrackState.Disabled => "disabled",
+                _ => throw new UnreachableException($"A track has no state {state}."),
+            }
+        );
+
+    // Under the lock: the file of any of the folders, track or not, whose name is name, ignoring case
     // and extension, other than the file at except.
     private string? Holder(string name, string? except) =>
         Files()

@@ -259,7 +259,7 @@ public sealed class AmbientSwitchTests
         const string deviceId = "0x0b0001";
         await harness.UploadAsync("Rain", await Tracks.WhiteNoiseAsync("wav", TrackLength, seed: 1));
         await harness.UploadAsync("Snow", await Tracks.WhiteNoiseAsync("wav", TrackLength, seed: 2));
-        await harness.TrackStore().UpdateAsync("Snow", null, false, Cancellation);
+        await harness.TrackStore().UpdateAsync("Snow", null, TrackState.Disabled, Cancellation);
         // Retained while the server knows no such device, so the ON it hears now starts nothing.
         await harness.SwitchAsync(deviceId, "ON", retain: true);
         var toilet = await harness.AddToiletAsync(deviceId);
@@ -274,7 +274,7 @@ public sealed class AmbientSwitchTests
             HomeAssistant.SwitchDiscovery(toilet, DeviceApi.UniqueId(toilet))
         );
 
-        // A start the ON had begun would play Rain, the one enabled track, and this one would join it.
+        // A start the ON had begun would play Rain, the one Ambient track, and this one would join it.
         Assert.Equal("Snow", await harness.PlayAmbientAsync(toilet, "Snow"));
         Assert.Equal(0, (await toilet.NextPacketAsync()).Index);
     }

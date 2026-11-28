@@ -15,8 +15,8 @@ internal enum AmbientRefusal
     NoSuchTrack,
 
     /// <summary>
-    /// The player cannot play on the device, or has nothing to play: no enabled track, or a track
-    /// that does not decode or decodes to no audio.
+    /// The player cannot play on the device, or has nothing to play: no track set to Ambient, or a
+    /// track that does not decode or decodes to no audio.
     /// </summary>
     CannotPlay,
 }
@@ -120,7 +120,7 @@ internal sealed class AmbientPlayer(
 
     /// <summary>
     /// Starts ambient sound on <paramref name="device"/>: the track named
-    /// <paramref name="track"/>, enabled or not, or, with none, an enabled track picked at random.
+    /// <paramref name="track"/>, in any state, or, with none, an Ambient track picked at random.
     /// Returns once the sound has begun or the start was refused. A device that is already
     /// playing, or starting to, plays on as it does, and the start returns what that playback's
     /// start returns.
@@ -305,7 +305,7 @@ internal sealed class AmbientPlayer(
                 playback,
                 playback.Requested is { } name
                     ? Refuse(device, AmbientRefusal.NoSuchTrack, TrackStore.NotFound(name).Detail!)
-                    : Refuse(device, AmbientRefusal.CannotPlay, "There is no enabled track to play.")
+                    : Refuse(device, AmbientRefusal.CannotPlay, "No track is set to Ambient.")
             );
 
         MeasuredAudio measured;
@@ -359,7 +359,7 @@ internal sealed class AmbientPlayer(
         return null;
     }
 
-    // Under the store's lock: an enabled track at random, but the device's last-played one
+    // Under the store's lock: an Ambient track at random, but the device's last-played one
     // unless it is the only one.
     private Track? Pick(Device device, IReadOnlyList<Track> all)
     {
@@ -367,11 +367,11 @@ internal sealed class AmbientPlayer(
         lock (_syncRoot)
             lastPlayed = _lastPlayed.GetValueOrDefault(device.DeviceId);
 
-        var enabled = all.Where(track => track.Enabled).ToList();
+        var ambient = all.Where(track => track.State == TrackState.Ambient).ToList();
         var candidates =
-            enabled.Count > 1
-                ? enabled.Where(track => !string.Equals(track.Name, lastPlayed, StringComparison.OrdinalIgnoreCase)).ToList()
-                : enabled;
+            ambient.Count > 1
+                ? ambient.Where(track => !string.Equals(track.Name, lastPlayed, StringComparison.OrdinalIgnoreCase)).ToList()
+                : ambient;
 
         return candidates.Count == 0 ? null : candidates[Random.Shared.Next(candidates.Count)];
     }
