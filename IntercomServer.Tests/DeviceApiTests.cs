@@ -246,13 +246,7 @@ public sealed class DeviceApiTests
         using (var empty = await harness.StartAmbientAsync(token, toilet.DeviceId, "Empty"))
         {
             Assert.Equal(HttpStatusCode.Conflict, empty.StatusCode);
-            // An FFmpeg that fails an input it decodes nothing of says so in its own words.
-            var detail = await TrackApi.ReadProblemDetailAsync(empty);
-            Assert.True(
-                detail == "The track 'Empty' decodes to no audio."
-                    || detail!.StartsWith("FFmpeg could not decode Empty: ", StringComparison.Ordinal),
-                $"The start answered {detail}"
-            );
+            Assert.Equal("The track 'Empty' decodes to no audio.", await TrackApi.ReadProblemDetailAsync(empty));
         }
 
         await harness.UploadAsync("Rain", await Tracks.WhiteNoiseAsync("wav", TrackLength));
