@@ -85,7 +85,17 @@ internal sealed class AmbientPlayer(
     public string? Playing(Device device)
     {
         lock (_syncRoot)
-            return _playbacks.GetValueOrDefault(device.DeviceId)?.Track;
+        {
+            // Of a playback and those before it, one at most has a track: its sound begins only
+            // once the one before it has ended.
+            for (var playback = _playbacks.GetValueOrDefault(device.DeviceId); playback != null; playback = playback.Previous)
+            {
+                if (playback.Track != null)
+                    return playback.Track;
+            }
+
+            return null;
+        }
     }
 
     /// <summary>
@@ -108,8 +118,7 @@ internal sealed class AmbientPlayer(
                 playback = current;
             else
             {
-                // A playback still fading out ends before this one's sound begins.
-                playback = new Playback(device, format, track, current?.Ended.Task ?? Task.CompletedTask);
+                playback = new Playback(device, format, track, current);
                 _playbacks[device.DeviceId] = playback;
                 starting = true;
             }
@@ -122,9 +131,9 @@ internal sealed class AmbientPlayer(
     }
 
     /// <summary>
-    /// Stops the ambient sound on <paramref name="device"/>, and returns once its playback has
-    /// ended: one that is playing fades out, and a start that has not yet begun its sound is
-    /// abandoned, its decode with it.
+    /// Stops the ambient sound on <paramref name="device"/>, and returns once its playback, and
+    /// the one it replaced, has ended: one that is playing fades out, and a start that has not yet
+    /// begun its sound is abandoned, its decode with it.
     /// </summary>
     public async Task StopAsync(Device device)
     {
@@ -177,15 +186,18 @@ internal sealed class AmbientPlayer(
     private async Task RunAsync(Playback playback)
     {
         var device = playback.Device;
+        var previous = playback.Previous;
         try
         {
             if (await PrepareAsync(playback) is not { } prepared)
                 return;
 
-            await playback.PreviousEnded.WaitAsync(playback.Stop.Token);
+            if (previous != null)
+                await previous.Ended.Task.WaitAsync(playback.Stop.Token);
 
             lock (_syncRoot)
             {
+                playback.Previous = null;
                 playback.Track = prepared.Track;
                 _lastPlayed[device.DeviceId] = prepared.Track;
             }
@@ -217,8 +229,17 @@ internal sealed class AmbientPlayer(
         }
         finally
         {
+            // One that ends before its sound began keeps the device's place until the one it
+            // replaced has ended, so the next start waits for that one's fade-out, and a stop for
+            // its end.
+            lock (_syncRoot)
+                playback.Stopping = true;
+            if (previous != null)
+                await previous.Ended.Task;
+
             lock (_syncRoot)
             {
+                playback.Track = null;
                 if (_playbacks.GetValueOrDefault(device.DeviceId) == playback)
                     _playbacks.Remove(device.DeviceId);
             }
@@ -369,9 +390,9 @@ internal sealed class AmbientPlayer(
     /// <summary>
     /// A device's playback, from its start until it has ended. A start that finds one playing
     /// or starting waits on its <see cref="Started"/>, and one that finds it stopping makes a new
-    /// one, whose sound waits for <see cref="PreviousEnded"/>.
+    /// one, whose sound waits for that one's <see cref="Ended"/>.
     /// </summary>
-    private sealed class Playback(Device device, AudioFormat format, string? requested, Task previousEnded)
+    private sealed class Playback(Device device, AudioFormat format, string? requested, Playback? previous)
     {
         public Device Device { get; } = device;
 
@@ -380,12 +401,16 @@ internal sealed class AmbientPlayer(
         /// <summary>The track the start named, or null for a pick at random.</summary>
         public string? Requested { get; } = requested;
 
-        public Task PreviousEnded { get; } = previousEnded;
+        /// <summary>Under the player's lock: the stopping playback this one replaced, until this one's sound begins.</summary>
+        public Playback? Previous { get; set; } = previous;
 
-        /// <summary>Under the player's lock: whether a stop has come, ahead of <see cref="Stop"/>.</summary>
+        /// <summary>
+        /// Under the player's lock: whether a stop has come, ahead of <see cref="Stop"/>, or the
+        /// playback is ending.
+        /// </summary>
         public bool Stopping { get; set; }
 
-        /// <summary>Under the player's lock: the track, once the sound has begun.</summary>
+        /// <summary>Under the player's lock: the track, from the sound's start until the playback ends.</summary>
         public string? Track { get; set; }
 
         /// <summary>Cancelled by a stop: it abandons the start, or fades the sound out.</summary>
@@ -394,6 +419,7 @@ internal sealed class AmbientPlayer(
         public TaskCompletionSource<AmbientResult> Started { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>Set once the playback, and the one it replaced, has ended.</summary>
         public TaskCompletionSource Ended { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 

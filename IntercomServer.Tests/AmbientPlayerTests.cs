@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Runtime.Versioning;
 using IntercomServer.Tests.Harness;
@@ -78,6 +79,31 @@ public sealed class AmbientPlayerTests
         // FFmpeg's meter gives the peak to a tenth of a dB.
         Assert.InRange(gain, -1 - measured.Peak - 0.1, -1 - measured.Peak);
         Assert.InRange(AmbientAudio.Peak(samples), -1.2, -1.0);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(200)]
+    public async Task The_fades_last_AMBIENT_FADE_MS_and_zero_plays_and_stops_at_full_level(int milliseconds)
+    {
+        await using var harness = await ServerHarness.StartAsync(
+            new Dictionary<string, string?> { ["AMBIENT_FADE_MS"] = milliseconds.ToString(CultureInfo.InvariantCulture) }
+        );
+        var toilet = await harness.AddToiletAsync("0x0b0001");
+        var rain = await Tracks.WhiteNoiseAsync("wav", TrackLength);
+        await harness.UploadAsync("Rain", rain);
+
+        await harness.PlayAmbientAsync(toilet);
+        var packets = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.6)));
+        await harness.EndAmbientAsync(toilet);
+        packets.AddRange(await AmbientAudio.RestAsync(toilet));
+
+        AmbientAudio.AssertOnePlayback(
+            AmbientAudio.Samples(packets),
+            await AmbientAudio.DecodedAsync(rain, DeviceApi.ToiletFormat),
+            DeviceApi.ToiletFormat.SampleRate * milliseconds / 1000,
+            fadedOut: true
+        );
     }
 
     [Fact]
@@ -210,6 +236,56 @@ public sealed class AmbientPlayerTests
             AmbientAudio.Fade,
             fadedOut: true
         );
+    }
+
+    [Fact]
+    public async Task A_start_during_a_fade_out_plays_once_the_fade_out_has_ended_though_a_start_between_them_was_refused()
+    {
+        // A fade that outlasts the refused start and the next one's decode.
+        await using var harness = await ServerHarness.StartAsync(
+            new Dictionary<string, string?> { ["AMBIENT_FADE_MS"] = "1000" }
+        );
+        const int fade = 48000;
+        var toilet = await harness.AddToiletAsync("0x0b0001");
+        var rain = await Tracks.WhiteNoiseAsync("wav", TrackLength, seed: 1);
+        var snow = await Tracks.WhiteNoiseAsync("wav", TrackLength, seed: 2);
+        await harness.UploadAsync("Rain", rain);
+        await harness.UploadAsync("Snow", snow);
+        var token = harness.UserToken();
+
+        await harness.PlayAmbientAsync(toilet, "Rain");
+        var packets = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(1.2)));
+        var stopping = harness.StopAmbientAsync(token, toilet.DeviceId);
+        // Until the stop has reached the player, a start joins the playback it stops.
+        while (true)
+        {
+            using var refused = await harness.StartAmbientAsync(token, toilet.DeviceId, "Nope");
+            if (refused.StatusCode == HttpStatusCode.NotFound)
+                break;
+            Assert.Equal(HttpStatusCode.OK, refused.StatusCode);
+        }
+        Assert.Equal("Rain", (await harness.AwaitDeviceAsync(toilet.DeviceId, _ => true)).Track);
+
+        Assert.Equal("Snow", await harness.PlayAmbientAsync(toilet, "Snow"));
+        using (var stopped = await stopping)
+            Assert.Equal(HttpStatusCode.NoContent, stopped.StatusCode);
+        // Past the second sound's fade-in.
+        packets.AddRange(toilet.TakeArrivedPackets());
+        packets.AddRange(await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(1.2))));
+        await harness.EndAmbientAsync(toilet);
+        packets.AddRange(await AmbientAudio.RestAsync(toilet));
+
+        // Sounds that overlapped would have their packets interleaved on the device's counter.
+        AmbientAudio.AssertNumbered(packets, first: 0);
+        var snowTrack = await AmbientAudio.DecodedAsync(snow, DeviceApi.ToiletFormat);
+        var second = AmbientAudio.FirstPacketOf(packets, snowTrack);
+        AmbientAudio.AssertOnePlayback(
+            AmbientAudio.Samples(packets.Take(second)),
+            await AmbientAudio.DecodedAsync(rain, DeviceApi.ToiletFormat),
+            fade,
+            fadedOut: true
+        );
+        AmbientAudio.AssertOnePlayback(AmbientAudio.Samples(packets.Skip(second)), snowTrack, fade, fadedOut: true);
     }
 
     [Fact]

@@ -111,6 +111,34 @@ internal static class AmbientAudio
         return 20 * Math.Log10(gain);
     }
 
+    /// <summary>
+    /// The index of the first of <paramref name="packets"/> that begins a playback of
+    /// <paramref name="track"/>: the first whose samples correlate with the track's first, at
+    /// whatever level the fade-in has them.
+    /// </summary>
+    public static int FirstPacketOf(IReadOnlyList<AudioPacket> packets, short[] track)
+    {
+        var index = packets.ToList().FindIndex(packet => Correlation(Samples([packet]), track) > 0.5);
+        Assert.True(index >= 0, "No packet begins a playback of the track.");
+        return index;
+    }
+
+    // The correlation of the samples with the track's first as many, independent of their levels:
+    // about 0.87 for a linear ramp from silence, and a few hundredths for another track's noise.
+    private static double Correlation(short[] samples, short[] track)
+    {
+        double product = 0;
+        double received = 0;
+        double sent = 0;
+        for (var i = 0; i < samples.Length; i++)
+        {
+            product += samples[i] * (double)track[i];
+            received += samples[i] * (double)samples[i];
+            sent += track[i] * (double)track[i];
+        }
+        return product / Math.Sqrt(received * sent);
+    }
+
     /// <summary>The peak of <paramref name="samples"/>, in dBFS.</summary>
     public static double Peak(short[] samples) =>
         20 * Math.Log10(samples.Max(sample => Math.Abs((int)sample)) / 32768.0);
