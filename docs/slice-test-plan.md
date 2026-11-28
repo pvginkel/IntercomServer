@@ -28,8 +28,9 @@ it; what a local boot would show, the suite shows with an in-process broker, and
 production can.
 
 **Standing rule, here and in every check against production: nothing audible in the house.** Never
-publish to the production broker's command topics (`intercom/server/set/…`, and
-`<prefix>/<id>/set/…` under every device prefix, `intercom/client` and `toilet_automation`), never
+publish to the production broker's command topics (`intercom/server/set/…`,
+`intercom/server/devices/<id>/set/…`, and `<prefix>/<id>/set/…` under every device prefix,
+`intercom/client` and `toilet_automation`), never
 ring the doorbell, never start a call, a conversation or a sound. Those are the operator's checks,
 named in the close-out. Everything below only reads.
 

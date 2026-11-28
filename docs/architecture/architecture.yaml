@@ -5,8 +5,10 @@ producer: intercom-server
 # MQTT-driven: it subscribes to the intercom/server topics and to the device
 # topics under each prefix in DEVICES_TOPIC_PREFIXES (intercom/client and
 # toilet_automation by default), and relays/triggers playback on devices,
-# brokering the peer UDP audio. Its web host also serves an HTTP API: /api,
-# behind Keycloak bearer tokens, and /updates, the app's update channel.
+# brokering the peer UDP audio. It plays ambient sound on the ToiletAutomation
+# devices, started and stopped by a switch it publishes to Home Assistant
+# through MQTT discovery. Its web host also serves an HTTP API: /api, behind
+# Keycloak bearer tokens, and /updates, the app's update channel.
 #
 # The intercom protocol IS the MQTT topic contract (<prefix>/<id>/...,
 # intercom/server/...), shared verbatim with the intercom and ToiletAutomation
@@ -14,8 +16,10 @@ producer: intercom-server
 # exposed via an ApplicationInterface (the topic namespace) that the intercom and
 # ToiletAutomation devices consume.
 # The service rides the MQTT broker as transport (cap:pub-sub-broker), which the
-# server also consumes directly. The HTTP API is a service of its own, exposed via
-# its interface, and its sign-in consumes the homelab IAM (cap:iam).
+# server also consumes directly. The ambient switch's discovery entities are the
+# Home Assistant MQTT edge, as the devices' own are. The HTTP API is a service of
+# its own, exposed via its interface, and its sign-in consumes the homelab IAM
+# (cap:iam).
 #
 # environment/cluster stay unset — per-env placement is the deployer's job.
 
@@ -24,8 +28,9 @@ applicationComponents:
     label: Intercom Server
     summary: >-
       .NET service that orchestrates the home audio intercom: it subscribes to
-      the intercom MQTT topics, relays call events, and triggers playback on the
-      intercom and ToiletAutomation devices.
+      the intercom MQTT topics, relays call events, triggers playback on the
+      intercom and ToiletAutomation devices, and plays ambient sound on the
+      ToiletAutomation devices, switched from Home Assistant.
     introduced: 2025-02-17
     lifecycle: active
     stereotype: SoftwareProduct
@@ -37,8 +42,9 @@ applicationServices:
   - id: svc:intercom,5914e568-7f39-461a-91fe-9981d5275fe1
     label: Intercom relay
     summary: >-
-      The intercom call/relay service: device registration, call routing, and
-      audio-endpoint brokering, spoken over an MQTT topic contract.
+      The intercom call/relay service: device registration, call routing,
+      audio-endpoint brokering, and the ambient sound and its Home Assistant
+      switch, spoken over an MQTT topic contract.
     introduced: 2025-02-17
     lifecycle: active
   - id: svc:intercom-api,7b02318f-b85c-451c-81ea-6dcf0ac73e8b
@@ -46,9 +52,10 @@ applicationServices:
     summary: >-
       HTTP API on the server's web host: /api, every call behind a Keycloak
       bearer token and a client role of intercom-server (user keeps the ambient
-      tracks under /api/ambient-tracks, pipeline publishes app releases), and
-      /updates?action=version|download, unauthenticated, the app's update
-      channel.
+      tracks under /api/ambient-tracks and lists the devices and starts and
+      stops their ambient sound under /api/devices, pipeline publishes app
+      releases), and /updates?action=version|download, unauthenticated, the
+      app's update channel.
     introduced: 2026-11-27
     lifecycle: active
 
@@ -60,6 +67,9 @@ applicationInterfaces:
       under each device prefix, intercom/client and toilet_automation by default,
       and intercom/server/...) that the intercom and ToiletAutomation devices use
       to register, receive control and the peer UDP endpoints to stream audio to.
+      Under intercom/server/ it also carries the server's status and, per device,
+      the ambient switch's state and its set/ambient commands, which Home
+      Assistant reads and publishes.
     introduced: 2025-02-17
     lifecycle: active
   - id: if:intercom-http-api,b26a6cfe-20bb-4d14-9d80-02b13a4fc8fd
@@ -67,6 +77,7 @@ applicationInterfaces:
     summary: >-
       The HTTP endpoints of the server's web host that the Android app and
       Jenkins call: /api with a Keycloak bearer token, /updates without one.
+      /api/devices is called by the tests and by hand.
     introduced: 2026-11-27
     lifecycle: active
 
@@ -97,6 +108,14 @@ relations:
     target: cap:pub-sub-broker
     type: Association
     boundBy: "env:MQTT_HOST"
+
+  # Home Assistant MQTT integration: publishes HA discovery entities (each
+  # ToiletAutomation device's ambient switch and track sensor); topic convention
+  # hardcoded → no boundBy.
+  - id: rel:intercom-server-ha-mqtt
+    source: app:intercom-server,c313fb20-b8df-4f6c-be1b-23af65e26705
+    target: svc:home-assistant-mqtt,23572189-9185-4a6d-a073-2b2820578e11
+    type: Association
 
   # The API's sign-in: bearer tokens from the realm KEYCLOAK_ISSUER names, whose
   # signing keys the server reads from it.

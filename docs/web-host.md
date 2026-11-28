@@ -3,7 +3,8 @@
 The server's HTTP side: its port and probes, the Keycloak sign-in every `/api` route takes, the
 ambient tracks it keeps and their API, and the update channel that publishes and serves the app's
 releases. How the deploy publishes the port is pvginkel/IntercomDeploy's. The devices' MQTT and
-UDP are in [`devices.md`](devices.md).
+UDP are in [`devices.md`](devices.md), and the device routes, which start and stop the ambient
+sound, in [`ambient-sound.md`](ambient-sound.md).
 
 ## The web host
 
@@ -34,7 +35,7 @@ for nothing. Each route asks for one role:
 
 | Role | Who holds it | Routes |
 | --- | --- | --- |
-| `user` | the app's user | the ambient tracks, `/api/ambient-tracks` |
+| `user` | the app's user | the ambient tracks, `/api/ambient-tracks`, and the devices, `/api/devices` |
 | `pipeline` | Jenkins' service account | the publish, `POST /api/app-releases` |
 
 A request without a valid token answers 401, with an empty body and `WWW-Authenticate: Bearer`;
@@ -66,8 +67,9 @@ The tracks are files under `<DATA_DIR>/ambient`, which the server creates at its
   `enabled/`, so a half-written upload is never a track. A new track is enabled. The start deletes
   what an earlier process left in `.incoming/`.
 - **Rename** is a rename in the track's folder, **enable and disable** move it between the
-  folders, and **delete** removes it. They run under one lock, with the list, a lookup and an
-  upload's last step, the name check and the rename.
+  folders, and **delete** removes it. They run under one lock, with the list, a lookup, the
+  ambient sound's pick and open of a track, and an upload's last step, the name check and the
+  rename. The ambient sound picks at random among the enabled tracks alone.
 - **Duration** is ffprobe's, kept in memory by path until the file's modification time changes.
   So the first list or lookup after a start probes every file once.
 

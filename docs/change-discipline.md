@@ -4,7 +4,8 @@ The rules every code change in this repo obeys. This is the doc `.aiworkflowrc` 
 `design_philosophy`: it is handed to every `code-writer`, `code-reviewer`, `plan-writer` and
 `plan-reviewer` the pipeline dispatches, and a reviewer cites it when sending work back. It states
 rules; what the server does is in its code, in [`devices.md`](devices.md),
-[`web-host.md`](web-host.md) and [`CHATGPT_MCP.md`](CHATGPT_MCP.md), and the architecture model in
+[`ambient-sound.md`](ambient-sound.md), [`web-host.md`](web-host.md) and
+[`CHATGPT_MCP.md`](CHATGPT_MCP.md), and the architecture model in
 [`architecture/architecture.yaml`](architecture/architecture.yaml).
 
 ## The wire contracts belong to the devices too
@@ -14,19 +15,26 @@ not own:
 
 - **MQTT**: the `<prefix>/<id>/…` topics the devices publish under each prefix in
   `DEVICES_TOPIC_PREFIXES` (`intercom/client` and `toilet_automation` by default), the `…/set/…`
-  topics the server publishes back under the device's own prefix (`Server.cs`, `Device.cs`), and
-  `intercom/server/set/…`, which Home Assistant publishes. Topic names, payload shapes, casing and
-  enum strings are shared verbatim with the intercom and ToiletAutomation firmware. The JSON shapes
-  are the DTOs in `IntercomServer.Utils`.
+  topics the server publishes back under the device's own prefix (`Server.cs`, `Device.cs`),
+  `intercom/server/set/…` and `intercom/server/devices/<id>/set/ambient`, which Home Assistant
+  publishes, and what the server publishes, retained, for Home Assistant: `intercom/server/status`,
+  `intercom/server/devices/<id>/state` and the ambient switch's discovery under `homeassistant/…`
+  (`AmbientSwitch.cs`). Topic names, payload shapes, casing and enum strings are shared verbatim
+  with the intercom and ToiletAutomation firmware and with Home Assistant. The JSON shapes the
+  devices publish are the DTOs in `IntercomServer.Utils`.
 - **UDP audio**: PCM in the format each device advertises as `audio_formats.out` (`Device.cs`), in
-  20 ms chunks split past 1468 bytes, each datagram a 4-byte big-endian packet index from the
-  device's own counter and its payload (`AudioSender.cs`), paced in real time because the devices'
-  jitter buffers are small (`AudioStreaming.cs`). [`devices.md`](devices.md) has the details.
+  20 ms chunks, each cut into the fewest datagrams of at most 1468 bytes of PCM, as equal as whole
+  frames allow, each datagram a 4-byte big-endian packet index from the device's own counter and
+  its payload (`AudioSender.cs`), paced in real time because the devices' jitter buffers are small
+  (`AudioStreaming.cs`), the ambient sound a prebuffer ahead (`AmbientPlayer.cs`).
+  [`devices.md`](devices.md) has the details.
 - **HTTP**: the web host's routes, which the app and Jenkins call: `/api/ambient-tracks` and
   `/api/app-releases` behind a Keycloak bearer token and a client role (`TrackEndpoints.cs`,
   `AppReleaseEndpoints.cs`, `SignIn.cs`), and `/updates`, MyDownloadsServer's two-call update
   contract, with none. Paths, form fields and their order, JSON shapes and status codes are shared
-  verbatim with them. [`web-host.md`](web-host.md) has the details.
+  verbatim with them. [`web-host.md`](web-host.md) has the details. `/api/devices`
+  (`DeviceEndpoints.cs`), behind a token too, is called by the tests and by hand, and
+  [`ambient-sound.md`](ambient-sound.md) has it.
 - **The deploy**: pvginkel/IntercomDeploy's chart sets the environment variables, prompt files and
   secret names production runs with. A setting the server has no default for, new or renamed,
   changes the chart in the same slice, or the pod crash-loops on the next roll:
@@ -100,10 +108,10 @@ data directory of its own, and only the settings the harness gives it, which `se
 overrides by their environment variable names, so ChatGPT is off. It drives the server as the
 devices, Home Assistant, the app and Jenkins do, through the parts in
 `IntercomServer.Tests/Harness/`: HTTP through `ServerHarness.SendAsync`, on the port the web host
-bound. Test classes run in parallel, and a timing pin joins `PacingTests`, a collection that runs
-alone. Nothing marks a message handled, so a check that something was *not* sent stands on a later
-positive observation: a control device the same sound reached, or
-`ServerHarness.AssertSentNoCommandAsync`.
+bound, and what the server publishes over MQTT through `ServerHarness.ObserveAsync`. Test classes
+run in parallel, and a timing pin joins `PacingTests`, a collection that runs alone. Nothing marks
+a message handled, so a check that something was *not* sent stands on a later positive
+observation: a control device the same sound reached, or `ServerHarness.AssertSentNoCommandAsync`.
 
 ## Build the project, never the solution
 
