@@ -43,9 +43,17 @@ not own:
 
 Inside this repo, **fix the callers**: no shim, adapter or second code path that keeps an old shape
 alive. A change to MQTT or UDP that the firmware must follow, or to the HTTP API that the app must
-follow, is a breaking change to a consumer nobody here can update in the same commit: make it only
-where the slice's design says so, and name it in the close-out so the operator can schedule the
-other side. The firmware is never waited on, watched or ordered from here.
+follow, is a breaking change: make it only where the slice's design says so. The firmware is a
+consumer nobody here can update in the same commit: name the change in the close-out so the
+operator can schedule the other side. The firmware is never waited on, watched or ordered from
+here. The app, pvginkel/IntercomClient, is developed in this environment so that the server's API
+and the app change in one session: the slice that changes a route the app or Jenkins calls changes
+the app's calls or its `Jenkinsfile`'s publish, and `TrackServer` and `UpdateServer`, the local
+servers its JVM tests run against, which answer the routes as [`web-host.md`](web-host.md) states
+them. The app on the phone meets the new API from the server's deploy until it updates itself to
+the release the slice's push of IntercomClient publishes
+([`slice-test-plan.md`](slice-test-plan.md), step 5), and one that can no longer read `/updates` is
+updated only by hand, from Jenkins.
 
 ## Devices by their id
 

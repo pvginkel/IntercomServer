@@ -38,11 +38,11 @@ whole diff, in one pass.
 5. **Another repo the slice created or changed** follows its own slice doc plan where it has one,
    else its `README.md`.
 
-**Consumers in other repos are named, not edited.** The device firmware, the ToiletAutomation design
-and Home Assistant's automations read this server's MQTT and UDP contracts, and the app, Jenkins'
-publish and the same design read its HTTP API. Where the slice changed one, or the implementation
-diverged from a design doc another repo keeps, the close-out says what changed and which doc it
-touches; this phase never edits that repo.
+**Consumers in repos the slice did not change are named, not edited.** The device firmware, the
+ToiletAutomation design and Home Assistant's automations read this server's MQTT and UDP contracts,
+and the app, Jenkins' publish and the same design read its HTTP API. Where the slice changed one, or
+the implementation diverged from a design doc another repo keeps, the close-out says what changed
+and which doc it touches; this phase never edits that repo.
 
 There is no README and no `CLAUDE.md` in this repo, and the doc phase writes neither unless the
 slice asked for one.
