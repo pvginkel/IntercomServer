@@ -205,7 +205,8 @@ public sealed class PacketTests
     [Fact]
     public async Task A_write_goes_as_the_fewest_payloads_of_at_most_1468_bytes_that_differ_by_one_sample_at_most()
     {
-        // A write's length in bytes, mono 16-bit, and the payloads it goes as.
+        // A write's length in bytes, mono 16-bit, and the payloads it goes as. A write of an odd
+        // length ends on a partial sample, whose byte the last payload carries after its samples.
         (int Bytes, int[] Payloads)[] writes =
         [
             (2, [2]),
@@ -213,6 +214,7 @@ public sealed class PacketTests
             (1470, [736, 734]),
             (1920, [960, 960]),
             (2938, [980, 980, 978]),
+            (2939, [980, 980, 979]),
         ];
 
         await using var harness = await ServerHarness.StartAsync();
