@@ -45,6 +45,36 @@ internal static class Tracks
         return MadeAsync(extension, "-f", "lavfi", "-i", $"sine=frequency=440:duration={seconds}");
     }
 
+    /// <summary>
+    /// A stereo recording FFmpeg makes: <see cref="RecordingAsync"/>'s tone on its left channel,
+    /// and silence on its right.
+    /// </summary>
+    public static Task<byte[]> LeftChannelRecordingAsync(string extension, TimeSpan length)
+    {
+        var seconds = length.TotalSeconds.ToString(CultureInfo.InvariantCulture);
+        return MadeAsync(
+            extension,
+            "-f",
+            "lavfi",
+            "-i",
+            $"sine=frequency=440:duration={seconds}",
+            "-af",
+            "pan=stereo|c0=c0"
+        );
+    }
+
+    /// <summary>A recording FFmpeg makes of silence lasting <paramref name="length"/>.</summary>
+    public static Task<byte[]> SilenceAsync(string extension, TimeSpan length) =>
+        MadeAsync(
+            extension,
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=channel_layout=mono:sample_rate=44100",
+            "-t",
+            length.TotalSeconds.ToString(CultureInfo.InvariantCulture)
+        );
+
     /// <summary>An MP4 file FFmpeg makes with a video stream and no audio.</summary>
     public static Task<byte[]> VideoAsync() =>
         MadeAsync("mp4", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=1", "-c:v", "mpeg4");
