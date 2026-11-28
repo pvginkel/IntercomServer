@@ -152,7 +152,12 @@ public sealed class DiscoveryTests
     public async Task The_setting_names_the_prefixes_and_a_device_under_any_other_is_not_discovered()
     {
         await using var harness = await ServerHarness.StartAsync(
-            new Dictionary<string, string?> { ["DEVICES_TOPIC_PREFIXES"] = "intercom/client, test/devices" }
+            new Dictionary<string, string?>
+            {
+                ["DEVICES_TOPIC_PREFIXES"] = "intercom/client, test/devices",
+                // The ambient player's prefixes are among the devices', and its default is not.
+                ["AMBIENT_TOPIC_PREFIXES"] = "test/devices",
+            }
         );
         var intercom = await harness.AddDeviceAsync("0x0a0001");
         var named = await harness.AddDeviceAsync("0x0c0001", "test/devices");

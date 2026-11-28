@@ -75,7 +75,8 @@ internal static class TrackApi
         return (string?)problem?["detail"];
     }
 
-    private static async Task<HttpResponseMessage> SendAsync(
+    /// <summary>Sends a request to <paramref name="path"/>, with <paramref name="token"/> as its bearer token when there is one.</summary>
+    internal static async Task<HttpResponseMessage> SendAsync(
         this ServerHarness harness,
         HttpMethod method,
         string path,

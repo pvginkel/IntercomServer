@@ -1,8 +1,12 @@
-﻿namespace IntercomServer;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+
+namespace IntercomServer;
 
 internal class DeviceManager
 {
-    private readonly Dictionary<string, Device> _devices = new();
+    // The MQTT handler adds and removes devices while the web host's threads read them.
+    private readonly ConcurrentDictionary<string, Device> _devices = new();
 
     public event EventHandler<DeviceEventArgs>? DeviceRemoved;
 
@@ -13,12 +17,17 @@ internal class DeviceManager
     /// </summary>
     public Device GetOrAdd(string topicPrefix, string deviceId)
     {
-        if (!_devices.TryGetValue(deviceId, out var device))
-        {
-            device = new Device(topicPrefix, deviceId);
-            _devices.Add(deviceId, device);
-        }
-        return device;
+        return _devices.GetOrAdd(deviceId, id => new Device(topicPrefix, id));
+    }
+
+    public bool TryGet(string deviceId, [MaybeNullWhen(false)] out Device device)
+    {
+        return _devices.TryGetValue(deviceId, out device);
+    }
+
+    public IEnumerable<Device> GetAll()
+    {
+        return _devices.Values;
     }
 
     public IEnumerable<Device> GetWhere(Func<Device, bool> filter)
@@ -38,7 +47,7 @@ internal class DeviceManager
 
     public void Remove(Device device)
     {
-        _devices.Remove(device.DeviceId);
+        _devices.TryRemove(device.DeviceId, out _);
 
         OnDeviceRemoved(new DeviceEventArgs(device));
     }

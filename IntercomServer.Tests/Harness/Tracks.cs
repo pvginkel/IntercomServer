@@ -1,6 +1,8 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using IntercomServer.Utils.Audio;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace IntercomServer.Tests.Harness;
@@ -74,6 +76,93 @@ internal static class Tracks
             "-t",
             length.TotalSeconds.ToString(CultureInfo.InvariantCulture)
         );
+
+    /// <summary>
+    /// White noise FFmpeg makes at 48 kHz, lasting <paramref name="length"/>, its peak about −12
+    /// dBFS, the same on every run for one <paramref name="seed"/>. No stretch of it repeats
+    /// another, so where a loop of it wraps shows in its samples.
+    /// </summary>
+    public static Task<byte[]> WhiteNoiseAsync(string extension, TimeSpan length, int seed = 1)
+    {
+        var seconds = length.TotalSeconds.ToString(CultureInfo.InvariantCulture);
+        return MadeAsync(
+            extension,
+            "-f",
+            "lavfi",
+            "-i",
+            $"anoisesrc=duration={seconds}:color=white:amplitude=0.25:seed={seed}"
+        );
+    }
+
+    /// <summary>
+    /// A FLAC file whose header claims a second of audio and that holds none: ffprobe reads a
+    /// length in it, and FFmpeg decodes it to no audio.
+    /// </summary>
+    public static async Task<byte[]> EmptyFlacAsync()
+    {
+        var flac = (
+            await MadeAsync("flac", "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=44100", "-t", "0")
+        ).ToArray();
+
+        // STREAMINFO, the first metadata block, follows the 4-byte marker and its own 4-byte
+        // header. From its 11th byte, 64 bits hold the sample rate (20), the channels (3), the bits
+        // per sample (5) and the total of samples (36), which a second's worth replaces.
+        var packed = flac.AsSpan(8 + 10, 8);
+        var fields = BinaryPrimitives.ReadUInt64BigEndian(packed);
+        var sampleRate = fields >> 44;
+        BinaryPrimitives.WriteUInt64BigEndian(packed, (fields & ~((1UL << 36) - 1)) | sampleRate);
+        return flac;
+    }
+
+    /// <summary>
+    /// A WAV file whose header declares a second of MP3 audio, and whose data is
+    /// <see cref="Noise"/>: ffprobe reads an audio stream and a length in it, and FFmpeg cannot
+    /// decode it.
+    /// </summary>
+    public static byte[] UndecodableWav()
+    {
+        var data = Noise();
+        var wav = new MemoryStream();
+        using var writer = new BinaryWriter(wav);
+        writer.Write("RIFF"u8);
+        writer.Write(36 + data.Length);
+        writer.Write("WAVEfmt "u8);
+        writer.Write(16);
+        writer.Write((short)0x55); // MPEG layer 3
+        writer.Write((short)1);
+        writer.Write(16000);
+        writer.Write(data.Length); // bytes a second
+        writer.Write((short)1);
+        writer.Write((short)0);
+        writer.Write("data"u8);
+        writer.Write(data.Length);
+        writer.Write(data);
+        writer.Flush();
+        return wav.ToArray();
+    }
+
+    /// <summary>A WAV file of <paramref name="samples"/>, 16-bit PCM in <paramref name="format"/>.</summary>
+    public static byte[] Wav(short[] samples, AudioFormat format)
+    {
+        var wav = new MemoryStream();
+        using var writer = new BinaryWriter(wav);
+        writer.Write("RIFF"u8);
+        writer.Write(36 + samples.Length * 2);
+        writer.Write("WAVEfmt "u8);
+        writer.Write(16);
+        writer.Write((short)1); // PCM
+        writer.Write((short)format.ChannelCount);
+        writer.Write(format.SampleRate);
+        writer.Write(format.BytesPerSecond);
+        writer.Write((short)(format.ChannelCount * 2));
+        writer.Write((short)16);
+        writer.Write("data"u8);
+        writer.Write(samples.Length * 2);
+        foreach (var sample in samples)
+            writer.Write(sample);
+        writer.Flush();
+        return wav.ToArray();
+    }
 
     /// <summary>An MP4 file FFmpeg makes with a video stream and no audio.</summary>
     public static Task<byte[]> VideoAsync() =>

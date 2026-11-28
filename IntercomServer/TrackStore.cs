@@ -129,12 +129,24 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
     /// null with none. The file reads on as it was opened when the track is renamed, moved or
     /// deleted meanwhile.
     /// </summary>
-    public async Task<(Track Track, FileStream Audio)?> OpenAsync(string name, CancellationToken cancellationToken)
+    public Task<(Track Track, FileStream Audio)?> OpenAsync(string name, CancellationToken cancellationToken) =>
+        OpenAsync(tracks => Find(tracks, name), cancellationToken);
+
+    /// <summary>
+    /// The track <paramref name="choose"/> picks from the tracks, sorted by name, ignoring case,
+    /// with its file open for reading, or null when it picks none. It picks under the store's
+    /// lock, so the track it picks is the one opened. The file reads on as
+    /// <see cref="OpenAsync(string, CancellationToken)"/>'s does.
+    /// </summary>
+    public async Task<(Track Track, FileStream Audio)?> OpenAsync(
+        Func<IReadOnlyList<Track>, Track?> choose,
+        CancellationToken cancellationToken
+    )
     {
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            if (Find(await TracksAsync(cancellationToken), name) is not { } track)
+            if (choose(await TracksAsync(cancellationToken)) is not { } track)
                 return null;
 
             return (
@@ -366,7 +378,7 @@ internal sealed class TrackStore(DataConfiguration data, TrackConfiguration conf
             .Select(file => file.Path)
             .FirstOrDefault();
 
-    private static Track? Find(List<Track> tracks, string name) =>
+    private static Track? Find(IReadOnlyList<Track> tracks, string name) =>
         tracks.FirstOrDefault(track => string.Equals(track.Name, name, StringComparison.OrdinalIgnoreCase));
 
     // The sentence saying which of a track name's rules name breaks, or null when it keeps them all.

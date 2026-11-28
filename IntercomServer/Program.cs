@@ -117,6 +117,7 @@ internal partial class Program
                                     var api = endpoints.MapGroup("/api").RequireAuthorization();
                                     endpoints.MapAppReleaseEndpoints(api);
                                     api.MapTrackEndpoints();
+                                    api.MapDeviceEndpoints();
                                 })
                         ),
                 // The aspnet image sets ASPNETCORE_HTTP_PORTS. The web host reads no ASPNETCORE_
@@ -130,6 +131,9 @@ internal partial class Program
                 services.AddHostedService(p => p.GetRequiredService<SoundLibrary>());
                 services.AddHostedService(p => p.GetRequiredService<TrackStore>());
                 services.AddHostedService<Service>();
+                // Hosted services stop in the reverse of this order, so the playbacks end while
+                // the server is still connected.
+                services.AddHostedService(p => p.GetRequiredService<AmbientPlayer>());
                 services.AddSingleton(
                     new ServerConfiguration
                     {
@@ -147,6 +151,20 @@ internal partial class Program
                 };
                 devicesConfiguration.Validate();
                 services.AddSingleton(devicesConfiguration);
+                var ambientConfiguration = new AmbientConfiguration
+                {
+                    TopicPrefixes = env("AMBIENT_TOPIC_PREFIXES") is { Length: > 0 } ambientPrefixes
+                        ? ambientPrefixes.Split(',', StringSplitOptions.TrimEntries)
+                        : new AmbientConfiguration().TopicPrefixes,
+                    Loudness = env("AMBIENT_LOUDNESS_LUFS") is { Length: > 0 } loudness
+                        ? double.Parse(loudness, NumberStyles.Float, CultureInfo.InvariantCulture)
+                        : new AmbientConfiguration().Loudness,
+                    Fade = env("AMBIENT_FADE_MS") is { Length: > 0 } fadeMs
+                        ? TimeSpan.FromMilliseconds(int.Parse(fadeMs, CultureInfo.InvariantCulture))
+                        : new AmbientConfiguration().Fade,
+                };
+                ambientConfiguration.Validate(devicesConfiguration);
+                services.AddSingleton(ambientConfiguration);
                 var doorbellConfiguration = new DoorbellConfiguration
                 {
                     ExtraDevices = env("DOORBELL_EXTRA_DEVICES") is { Length: > 0 } extraDevices
@@ -213,6 +231,7 @@ internal partial class Program
                 services.AddSingleton<MqttClientFactory>();
                 services.AddSingleton<AlarmManager>();
                 services.AddSingleton<PlaybackManager>();
+                services.AddSingleton<AmbientPlayer>();
                 services.AddSingleton(new AudioDecoder("ffmpeg"));
                 services.AddSingleton<SoundLibrary>();
                 services.AddSingleton<AudioSender>();

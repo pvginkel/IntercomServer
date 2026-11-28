@@ -84,7 +84,7 @@ public sealed class DecodingTests
             .Services.GetRequiredService<AudioDecoder>()
             .DecodeAsync(
                 "a WAV",
-                new MemoryStream(Wav(samples, format)),
+                new MemoryStream(Tracks.Wav(samples, format)),
                 format,
                 TestContext.Current.CancellationToken
             );
@@ -399,27 +399,5 @@ public sealed class DecodingTests
         }
 
         public void Dispose() => Directory.Delete(_directory, recursive: true);
-    }
-
-    private static byte[] Wav(short[] samples, AudioFormat format)
-    {
-        var wav = new MemoryStream();
-        using var writer = new BinaryWriter(wav);
-        writer.Write("RIFF"u8);
-        writer.Write(36 + samples.Length * 2);
-        writer.Write("WAVEfmt "u8);
-        writer.Write(16);
-        writer.Write((short)1); // PCM
-        writer.Write((short)format.ChannelCount);
-        writer.Write(format.SampleRate);
-        writer.Write(format.BytesPerSecond);
-        writer.Write((short)(format.ChannelCount * 2));
-        writer.Write((short)16);
-        writer.Write("data"u8);
-        writer.Write(samples.Length * 2);
-        foreach (var sample in samples)
-            writer.Write(sample);
-        writer.Flush();
-        return wav.ToArray();
     }
 }
