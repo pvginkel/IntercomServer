@@ -377,6 +377,34 @@ public sealed class PacingTests
             );
     }
 
+    [Fact]
+    public async Task Each_wait_is_drawn_anew_so_some_end_in_the_first_half_of_OCCASIONAL_WAIT_MIN_SECONDS_to_OCCASIONAL_WAIT_MAX_SECONDS_and_some_in_the_second()
+    {
+        var settings = await OccasionalSounds.SettingsAsync();
+        settings["OCCASIONAL_WAIT_MAX_SECONDS"] = "3";
+        await using var harness = await ServerHarness.StartAsync(settings);
+        var intercom = await harness.AddDeviceAsync("0x0a0001");
+        await intercom.ComeOnlineAsync();
+        await harness.UploadAsync("Chime", await Tracks.WhiteNoiseAsync("wav", TimeSpan.FromSeconds(0.1)));
+
+        await harness.SetOccasionalAsync("Chime");
+        // A gap is its wait and the moment's decode, well under a second: a wait drawn from 1 s to
+        // 3 s ends either side of 2 s, a fixed one always on the same side.
+        var halfway = TimeSpan.FromSeconds(2);
+        var gaps = new List<TimeSpan>();
+        var before = await OccasionalSounds.NextSoundAsync(intercom);
+        while (!(gaps.Any(gap => gap < halfway) && gaps.Any(gap => gap >= halfway)))
+        {
+            Assert.True(
+                gaps.Count < 20,
+                $"Twenty gaps on one side of 2 s: {string.Join(", ", gaps.Select(gap => $"{gap.TotalSeconds:0.00} s"))}."
+            );
+            var sound = await OccasionalSounds.NextSoundAsync(intercom);
+            gaps.Add(sound[0].ArrivedAfter(before[^1]));
+            before = sound;
+        }
+    }
+
     // The sounds whose first packet arrives at the device within `during`, each its packets until
     // none arrives for AmbientAudio.Quiet.
     private static async Task<List<List<AudioPacket>>> SoundsAsync(TestDevice device, TimeSpan during)

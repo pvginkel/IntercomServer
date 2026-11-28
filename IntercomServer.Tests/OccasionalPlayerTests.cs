@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
+using System.Runtime.Versioning;
 using System.Text.Json.Nodes;
 using IntercomServer.Tests.Harness;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,8 +18,8 @@ namespace IntercomServer.Tests;
 /// format, levelled to <c>OCCASIONAL_LOUDNESS_LUFS</c> and played once on the device's counter,
 /// from its start to its end, and it ends early once its device goes offline, is removed or
 /// advertises no endpoint or another format, and at the server's shutdown. Each Occasional track
-/// plays once a round, a round reads the store at each moment, and a new round's first is not the
-/// last one played. A moment with no Occasional track, or outside the window, plays nothing and
+/// plays once a round, in an order drawn at random, a round reads the store at each moment, and a
+/// new round's first is not the last one played. A moment with no Occasional track, or outside the window, plays nothing and
 /// logs nothing; one with no idle speaker is logged. The waits are <c>PacingTests</c>'.
 /// </summary>
 public sealed class OccasionalPlayerTests
@@ -256,7 +258,7 @@ public sealed class OccasionalPlayerTests
     }
 
     [Fact]
-    public async Task Each_Occasional_track_plays_once_in_a_round_and_a_new_round_s_first_is_not_the_last_one_played()
+    public async Task Each_Occasional_track_plays_once_in_a_round_in_an_order_drawn_at_random_and_a_new_round_s_first_is_not_the_last_one_played()
     {
         await using var harness = await ServerHarness.StartAsync(await OccasionalSounds.SettingsAsync());
         var intercom = await harness.AddDeviceAsync("0x0a0001");
@@ -271,17 +273,65 @@ public sealed class OccasionalPlayerTests
 
         foreach (var name in tracks.Keys)
             await harness.SetOccasionalAsync(name);
-        var played = new List<string>();
-        for (var i = 0; i < 6; i++)
+        // Round after round until one is in another order than the first: an order drawn at
+        // random repeats the first's one time in four, and one the names fix every time.
+        var rounds = new List<List<string>> { await RoundAsync() };
+        do
         {
-            var sound = await OccasionalSounds.NextSoundAsync(intercom);
-            played.Add(OccasionalSounds.Which(sound, tracks));
-            AmbientAudio.AssertOnePlayback(AmbientAudio.Samples(sound), tracks[played[^1]], fade: 0, fadedOut: false);
+            Assert.True(rounds.Count < 10, $"Ten rounds played in the order {string.Join(", ", rounds[0])}.");
+            var round = await RoundAsync();
+            Assert.NotEqual(rounds[^1][^1], round[0]);
+            rounds.Add(round);
+        } while (rounds[^1].SequenceEqual(rounds[0]));
+
+        async Task<List<string>> RoundAsync()
+        {
+            var played = new List<string>();
+            for (var i = 0; i < tracks.Count; i++)
+            {
+                var sound = await OccasionalSounds.NextSoundAsync(intercom);
+                played.Add(OccasionalSounds.Which(sound, tracks));
+                AmbientAudio.AssertOnePlayback(AmbientAudio.Samples(sound), tracks[played[^1]], fade: 0, fadedOut: false);
+            }
+            Assert.Equal(["A", "B", "C"], played.Order());
+            return played;
+        }
+    }
+
+    [Fact]
+    public async Task A_new_round_s_first_is_never_the_last_one_played_so_two_Occasional_tracks_take_turns()
+    {
+        var files = new Dictionary<string, byte[]>();
+        var tracks = new Dictionary<string, short[]>();
+        foreach (var (name, seed) in new[] { ("A", 1), ("B", 2) })
+        {
+            files[name] = await Tracks.WhiteNoiseAsync("wav", TimeSpan.FromSeconds(0.1), seed);
+            tracks[name] = await AmbientAudio.DecodedAsync(files[name], LivePlayback.Format);
         }
 
-        Assert.Equal(["A", "B", "C"], played[..3].Order());
-        Assert.Equal(["A", "B", "C"], played[3..].Order());
-        Assert.NotEqual(played[2], played[3]);
+        // Each server keeps a round of its own, so four side by side cross twelve rounds' ends in
+        // eight sounds each, at each of which a first drawn from both tracks repeats one time in two.
+        var played = await Task.WhenAll(
+            Enumerable
+                .Range(0, 4)
+                .Select(async _ =>
+                {
+                    await using var harness = await ServerHarness.StartAsync(await OccasionalSounds.SettingsAsync());
+                    var intercom = await harness.AddDeviceAsync("0x0a0001");
+                    await intercom.ComeOnlineAsync();
+                    foreach (var (name, file) in files)
+                        await harness.UploadAsync(name, file);
+                    foreach (var name in files.Keys)
+                        await harness.SetOccasionalAsync(name);
+
+                    var names = new List<string>();
+                    for (var i = 0; i < 8; i++)
+                        names.Add(OccasionalSounds.Which(await OccasionalSounds.NextSoundAsync(intercom), tracks));
+                    return names;
+                })
+        );
+
+        Assert.All(played, names => Assert.All(names.Zip(names.Skip(1)), pair => Assert.NotEqual(pair.First, pair.Second)));
     }
 
     [Fact]
@@ -386,6 +436,34 @@ public sealed class OccasionalPlayerTests
             messages.IndexOf(Skipped) < messages.FindIndex(message => message.StartsWith("Playing occasional track Chime")),
             string.Join('\n', messages)
         );
+    }
+
+    [Fact]
+    [UnsupportedOSPlatform("windows")]
+    public async Task A_speaker_whose_ambient_start_is_still_decoding_is_not_picked()
+    {
+        using var log = ServerLog.Capture();
+        using var ffmpeg = new HeldFfmpeg();
+        await using var harness = await ServerHarness.StartAsync(
+            await OccasionalSounds.SettingsAsync(),
+            services => services.AddSingleton(new AudioDecoder(ffmpeg.Executable))
+        );
+        var toilet = await harness.AddToiletAsync("0x0b0001");
+        // Small enough for FFmpeg's input pipe to take whole while FFmpeg is held.
+        await harness.UploadAsync("Rain", await Tracks.WhiteNoiseAsync("mp3", TimeSpan.FromSeconds(1)));
+        await harness.UploadAsync("Chime", await Tracks.WhiteNoiseAsync("wav", TimeSpan.FromSeconds(0.3), seed: 2));
+
+        ffmpeg.Hold();
+        var starting = harness.StartAmbientAsync(harness.UserToken(), toilet.DeviceId, "Rain");
+        await ffmpeg.HeldAsync();
+        await harness.SetOccasionalAsync("Chime");
+        // The toilet is the only speaker: a moment that took it as idle would hold in its own
+        // decode, and log nothing.
+        await log.LoggedAsync<OccasionalPlayer>(Skipped);
+
+        ffmpeg.Release();
+        using var start = await starting;
+        Assert.Equal(HttpStatusCode.OK, start.StatusCode);
     }
 
     [Theory]

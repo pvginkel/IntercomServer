@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using Serilog.Events;
 using Serilog.Formatting.Display;
@@ -43,6 +44,19 @@ internal sealed class ServerLog : IDisposable
                 return writer.ToString();
             })
             .ToList();
+
+    /// <summary>Waits until the server's <typeparamref name="T"/> has logged <paramref name="message"/>.</summary>
+    public async Task LoggedAsync<T>(string message)
+    {
+        var waited = Stopwatch.StartNew();
+        while (!Messages<T>().Contains(message))
+        {
+            if (waited.Elapsed > Timeouts.Observe)
+                throw new TimeoutException($"Waited {Timeouts.Observe.TotalSeconds:0} s for {typeof(T).Name} to log '{message}'.");
+
+            await Task.Delay(TimeSpan.FromMilliseconds(10), TestContext.Current.CancellationToken);
+        }
+    }
 
     public void Dispose() => TestLogging.Captured.TryRemove(_test, out _);
 }
