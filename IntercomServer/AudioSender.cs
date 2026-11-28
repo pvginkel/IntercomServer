@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using IntercomServer.Utils.Audio;
@@ -11,13 +12,16 @@ namespace IntercomServer;
 /// is sent to, and runs on across everything sent to it, from any stream, while the server runs.
 /// Each write goes as the fewest datagrams of at most 1472 bytes that carry whole frames, their
 /// payloads as equal as whole frames allow: the firmware fills a lost or late packet with the
-/// stream's mean packet size.
+/// stream's mean packet size. It reckons, by device id too, how much of what it sent each device
+/// still holds, the device playing in real time what it holds from its arrival.
 /// </summary>
 internal class AudioSender : IDisposable
 {
     private readonly UdpClient _client = new();
     private readonly Queue<(IPEndPoint EndPoint, byte[] Data)> _sendQueue = new();
     private readonly Dictionary<string, int> _nextPacketIndex = new();
+    // Under the lock: the Stopwatch timestamp at which each device has played all it was sent.
+    private readonly Dictionary<string, long> _playedUntil = new();
     private readonly Lock _syncRoot = new();
     private bool _sendLoopRunning;
 
@@ -32,6 +36,13 @@ internal class AudioSender : IDisposable
         var maxPacketBytes = maxDataSize / frameBytes * frameBytes;
         var packets = (data.Length + maxPacketBytes - 1) / maxPacketBytes;
         var frames = data.Length / frameBytes;
+
+        lock (_syncRoot)
+        {
+            var now = Stopwatch.GetTimestamp();
+            _playedUntil[deviceId] =
+                Math.Max(_playedUntil.GetValueOrDefault(deviceId), now) + frames * Stopwatch.Frequency / format.SampleRate;
+        }
 
         var offset = 0;
         for (var packet = 0; packet < packets; packet++)
@@ -48,6 +59,17 @@ internal class AudioSender : IDisposable
             offset += len;
 
             Enqueue(deviceId, endPoint, buffer);
+        }
+    }
+
+    /// <summary>How much audio the device <paramref name="deviceId"/> still holds of what it was sent.</summary>
+    public TimeSpan Held(string deviceId)
+    {
+        lock (_syncRoot)
+        {
+            var now = Stopwatch.GetTimestamp();
+            var playedUntil = _playedUntil.GetValueOrDefault(deviceId);
+            return playedUntil > now ? Stopwatch.GetElapsedTime(now, playedUntil) : TimeSpan.Zero;
         }
     }
 

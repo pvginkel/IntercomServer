@@ -364,10 +364,11 @@ internal sealed class AmbientPlayer(
     /// <summary>
     /// Sends <paramref name="pcm"/>, looped, in chunks of <see cref="Constants.AudioChunkSize"/>,
     /// each filled across the loop's seam. The first chunks go faster than real time, until the
-    /// stream is the prebuffer ahead of it after <see cref="LeadSpread"/>, and it then stays that
-    /// far ahead. The level ramps up from silence over the fade, and, once a stop has come, down
-    /// to silence over the fade, after which the stream ends. It ends too once the device
-    /// advertises no endpoint, or another format.
+    /// device holds the prebuffer after <see cref="LeadSpread"/>, and it then stays that far
+    /// ahead. What the device still holds at the start, a previous playback's lead among it,
+    /// counts toward the prebuffer. The level ramps up from silence over the fade, and, once a
+    /// stop has come, down to silence over the fade, after which the stream ends. It ends too
+    /// once the device advertises no endpoint, or another format.
     /// </summary>
     private async Task StreamAsync(Playback playback, byte[] pcm)
     {
@@ -378,7 +379,9 @@ internal sealed class AmbientPlayer(
         var chunkFrames = format.SampleRate * (int)Constants.AudioChunkSize.TotalMilliseconds / 1000;
         var chunk = new byte[chunkFrames * 2];
         var trackFrames = pcm.Length / 2;
-        var prebuffer = configuration.Prebuffer.TotalSeconds;
+        // The lead this stream adds to what the device still holds, negative where that is more
+        // than the prebuffer.
+        var lead = configuration.Prebuffer.TotalSeconds - sender.Held(device.DeviceId).TotalSeconds;
         var spread = LeadSpread.TotalSeconds;
 
         var position = 0; // The frame of the track the next chunk starts at.
@@ -389,6 +392,14 @@ internal sealed class AmbientPlayer(
 
         while (true)
         {
+            // When the chunk that starts at the audio sent is due: that audio less the lead, which
+            // grows from none at the start to the stream's whole lead at the end of the spread.
+            var audio = (double)sent / format.SampleRate;
+            var due = Math.Max(audio - lead, audio * spread / (Math.Max(lead, 0) + spread));
+            var delay = TimeSpan.FromSeconds(due) - stopwatch.Elapsed;
+            if (delay.Ticks > 0)
+                await Task.Delay(delay);
+
             if (fadingFrom == null && playback.Stop.IsCancellationRequested)
             {
                 fadingFrom = sent;
@@ -420,14 +431,6 @@ internal sealed class AmbientPlayer(
 
             sender.Send(device.DeviceId, endpoint, format, chunk.AsSpan(0, frames * 2));
             sent += frames;
-
-            // When the next chunk is due: the audio sent less the lead, which grows from none at
-            // the start to the prebuffer at the end of the spread.
-            var audio = (double)sent / format.SampleRate;
-            var due = Math.Max(audio - prebuffer, audio * spread / (prebuffer + spread));
-            var delay = TimeSpan.FromSeconds(due) - stopwatch.Elapsed;
-            if (delay.Ticks > 0)
-                await Task.Delay(delay);
         }
 
         double FadeIn(long frame) => frame < fade ? (double)frame / fade : 1;

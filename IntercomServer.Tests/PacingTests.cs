@@ -1,3 +1,4 @@
+using System.Net;
 using IntercomServer.Tests.Harness;
 
 namespace IntercomServer.Tests;
@@ -10,7 +11,8 @@ namespace IntercomServer.Tests;
 /// shown on the one source that does, the ChatGPT bridge's live stream (<see cref="LivePlayback"/>).
 /// Each sits well clear of 60 ms, since a loaded machine stretches both. An ambient playback alone
 /// runs ahead of real time: its prebuffer goes out over its first 100 ms, it then stays that far
-/// ahead, and its cap, counted in real time from its start, fades it out. The class runs alone,
+/// ahead, and its cap, counted in real time from its start, fades it out. One that starts while
+/// the device still holds what was sent before tops it up to the prebuffer. The class runs alone,
 /// after the suite's other tests, so their servers do not stretch it too.
 /// </summary>
 [Collection(nameof(PacingTests))]
@@ -175,6 +177,57 @@ public sealed class PacingTests
             lead <= prebuffer + TimeSpan.FromMilliseconds(100),
             $"The stream went {lead.TotalMilliseconds:0} ms ahead of real time."
         );
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_start_soon_after_a_stop_tops_the_device_up_to_AMBIENT_PREBUFFER_MS_and_no_further(bool duringFadeOut)
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var toilet = await harness.AddToiletAsync("0x0b0001");
+        await harness.UploadAsync("Rain", await Tracks.WhiteNoiseAsync("wav", TimeSpan.FromSeconds(1)));
+        var token = harness.UserToken();
+
+        await harness.PlayAmbientAsync(toilet);
+        var packets = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(1.2)));
+        if (duringFadeOut)
+        {
+            // The start waits out the fade-out, so its sound begins as the fade-out's last chunk
+            // goes. Until the stop has reached the player, a start joins the playback it stops.
+            var stopping = harness.StopAmbientAsync(token, toilet.DeviceId);
+            while (true)
+            {
+                using var refused = await harness.StartAmbientAsync(token, toilet.DeviceId, "Nope");
+                if (refused.StatusCode == HttpStatusCode.NotFound)
+                    break;
+                Assert.Equal(HttpStatusCode.OK, refused.StatusCode);
+            }
+            await harness.PlayAmbientAsync(toilet);
+            using var stopped = await stopping;
+            Assert.Equal(HttpStatusCode.NoContent, stopped.StatusCode);
+        }
+        else
+        {
+            await harness.EndAmbientAsync(toilet);
+            await harness.PlayAmbientAsync(toilet);
+        }
+        packets.AddRange(toilet.TakeArrivedPackets());
+        packets.AddRange(await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(1.5))));
+
+        // What the device holds as each packet arrives, playing what it holds in real time: what
+        // it held at the packet before, less the time since, and the packet's audio. A fresh
+        // prebuffer on top of what the first playback left would hold about twice the prebuffer.
+        var held = new List<double>();
+        for (var i = 0; i < packets.Count; i++)
+        {
+            var left = i == 0 ? 0 : Math.Max(0, held[^1] - packets[i].ArrivedAfter(packets[i - 1]).TotalSeconds);
+            held.Add(left + (double)packets[i].Payload.Length / 2 / DeviceApi.ToiletFormat.SampleRate);
+        }
+        const double prebuffer = 0.5;
+        Assert.True(held.Max() <= prebuffer + 0.1, $"The device held {held.Max() * 1000:0} ms.");
+        var end = held.TakeLast(AmbientAudio.Packets(TimeSpan.FromSeconds(0.5))).Max();
+        Assert.True(end >= prebuffer - 0.1, $"The second playback kept the device {end * 1000:0} ms ahead.");
     }
 
     [Fact]
