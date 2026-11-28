@@ -314,7 +314,7 @@ It reads `Checkout`, `Test`, `Build apk` and `Publish apk`, each `SUCCESS`; one 
 Then the APK it archived, in a directory of its own, read in the `android` tool container:
 
 ```bash
-D=/work/scratch/intercom-client-$N; mkdir "$D" && cd "$D"
+D=/work/scratch/intercom-client-$N; mkdir -p "$D" && cd "$D"
 curl "${J[@]}" -o app-release.apk "$B/artifact/app-release.apk"
 cexec android sh -c '
 aapt2 dump badging app-release.apk | grep -E "^(package|minSdkVersion|targetSdkVersion|uses-permission):"
