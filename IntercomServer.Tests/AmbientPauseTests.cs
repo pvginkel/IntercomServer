@@ -224,7 +224,8 @@ public sealed class AmbientPauseTests
                 "switch" => harness.SwitchAsync(ToiletId, "OFF"),
                 "routes" => harness.EndAmbientAsync(toilet),
                 "offline" => toilet.PublishStateAsync(online: false),
-                "removal" => toilet.PublishConfigurationAsync(null),
+                // Its configuration kept, the device still has an endpoint to send to.
+                "removal" => toilet.PublishAsync("state", null, retain: true),
                 "shutdown" => harness.StopServerAsync(),
                 _ => Task.CompletedTask,
             }
