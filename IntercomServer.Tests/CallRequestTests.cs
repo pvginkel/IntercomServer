@@ -9,7 +9,7 @@ namespace IntercomServer.Tests;
 /// as the caller's does, and the ring plays to them in a loop. With nobody to ring, the caller's red LED says the call is not possible. A
 /// ringing call ends when the caller clicks again, when 15 seconds pass (<c>UnansweredCallTests</c>),
 /// when a device accepts it (<c>CallTests</c>), or when a long click rejects it, which plays the
-/// rejected tone to the caller.
+/// rejected tone to the caller. A device removed from the server while it is rung is rung no more.
 /// </summary>
 public sealed class CallRequestTests
 {
@@ -84,6 +84,26 @@ public sealed class CallRequestTests
         await called.ExpectCommandsAsync(RedLed(Led.Off));
         await Calls.AssertRingStoppedAsync(called);
         await Calls.AssertNoCallAsync(called, caller);
+    }
+
+    [Fact]
+    public async Task A_device_removed_while_a_call_rings_it_is_rung_no_more_so_the_cancel_sends_it_nothing()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var caller = await harness.AddDeviceAsync("0x0a0001");
+        var called = await harness.AddDeviceAsync("0x0a0002");
+        var removed = await harness.AddDeviceAsync("0x0a0003");
+        await caller.ComeOnlineAsync();
+        await called.ComeOnlineAsync();
+        await removed.ComeOnlineAsync();
+        await Calls.RequestAsync(caller, called, removed);
+
+        await removed.PublishConfigurationAsync(null);
+        await caller.ClickAsync();
+
+        await caller.ExpectCommandsAsync(RedLed(Led.Off));
+        await called.ExpectCommandsAsync(RedLed(Led.Off));
+        await harness.AssertSentNoCommandAsync(removed);
     }
 
     [Fact]
