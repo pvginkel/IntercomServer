@@ -9,6 +9,7 @@ namespace IntercomServer;
 /// <summary>
 /// A track's state, kept as the folder its file is in. A start of ambient sound that names no
 /// track picks among the <see cref="Ambient"/> ones; one that names a track plays it in any state.
+/// The occasional player plays the <see cref="Occasional"/> ones.
 /// </summary>
 internal enum TrackState
 {

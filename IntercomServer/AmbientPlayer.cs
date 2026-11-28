@@ -58,13 +58,6 @@ internal sealed class AmbientPlayer(
     // How long the stream takes, from its start, to get the prebuffer ahead of real time.
     private static readonly TimeSpan LeadSpread = TimeSpan.FromMilliseconds(100);
 
-    // The level, in dBFS, the gain holds a track's peak at.
-    private const double PeakCeiling = -1;
-
-    // FFmpeg prints a level to a tenth of a dB, so a track's own peak lies up to this far above
-    // the one its meter gives.
-    private const double PeakRounding = 0.05;
-
     private readonly Lock _syncRoot = new();
 
     // Under the lock: each device's playback, by device id, from its start until it has ended;
@@ -116,6 +109,16 @@ internal sealed class AmbientPlayer(
 
             return null;
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="device"/> has an ambient playback, from its start until it has
+    /// ended: starting, playing, paused or fading out.
+    /// </summary>
+    public bool HasPlayback(Device device)
+    {
+        lock (_syncRoot)
+            return _playbacks.ContainsKey(device.DeviceId);
     }
 
     /// <summary>
@@ -328,18 +331,7 @@ internal sealed class AmbientPlayer(
                 Refuse(device, AmbientRefusal.CannotPlay, $"The track '{track.Name}' decodes to no audio.")
             );
 
-        // Silence measures a peak of negative infinity, so its gain is the loudness's alone.
-        var gain = Math.Min(
-            configuration.Loudness - measured.Loudness,
-            PeakCeiling - (measured.Peak + PeakRounding)
-        );
-        var factor = Math.Pow(10, gain / 20);
-        for (var i = 0; i < measured.Pcm.Length; i += 2)
-        {
-            var sample = BinaryPrimitives.ReadInt16LittleEndian(measured.Pcm.AsSpan(i));
-            BinaryPrimitives.WriteInt16LittleEndian(measured.Pcm.AsSpan(i), (short)Math.Round(sample * factor));
-        }
-
+        var gain = Levelling.Apply(measured, configuration.Loudness);
         return new Prepared(track.Name, measured.Pcm, gain);
     }
 

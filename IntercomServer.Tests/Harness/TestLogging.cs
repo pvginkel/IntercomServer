@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using IntercomServer.Tests.Harness;
 using Serilog;
 using Serilog.Core;
@@ -15,6 +16,12 @@ namespace IntercomServer.Tests.Harness;
 /// </summary>
 public sealed class TestLogging
 {
+    /// <summary>
+    /// By the unique id of a test that captures its servers' log (<see cref="ServerLog"/>), the
+    /// events logged in its flow since.
+    /// </summary>
+    internal static readonly ConcurrentDictionary<string, ConcurrentQueue<LogEvent>> Captured = new();
+
     public TestLogging()
     {
         Log.Logger = new LoggerConfiguration()
@@ -33,6 +40,9 @@ public sealed class TestLogging
 
         public void Emit(LogEvent logEvent)
         {
+            if (TestContext.Current.Test is { } test && Captured.TryGetValue(test.UniqueID, out var captured))
+                captured.Enqueue(logEvent);
+
             var output = TestContext.Current.TestOutputHelper;
             if (output == null)
                 return;

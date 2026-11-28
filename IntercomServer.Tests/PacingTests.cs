@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using IntercomServer.Tests.Harness;
 
@@ -13,8 +14,10 @@ namespace IntercomServer.Tests;
 /// runs ahead of real time: its prebuffer goes out over its first 100 ms, it then stays that far
 /// ahead, and its cap, counted in real time from its start, fades it out. One that starts while
 /// the device still holds what was sent before tops it up to the prebuffer, and so does one that
-/// resumes after another sound paused it, counting what the device still holds of that sound. The
-/// class runs alone, after the suite's other tests, so their servers do not stretch it too.
+/// resumes after another sound paused it, counting what the device still holds of that sound. An
+/// occasional sound goes in real time, one at a time for the whole house, each after a wait drawn
+/// from the end of the one before. The class runs alone, after the suite's other tests, so their
+/// servers do not stretch it too.
 /// </summary>
 [Collection(nameof(PacingTests))]
 public sealed class PacingTests
@@ -338,6 +341,55 @@ public sealed class PacingTests
             TimeSpan.FromSeconds(1.75)
         );
         Assert.Null((await harness.AwaitDeviceAsync(toilet.DeviceId, _ => true)).Track);
+    }
+
+    [Fact]
+    public async Task Occasional_sounds_play_in_real_time_one_at_a_time_each_after_a_wait_from_OCCASIONAL_WAIT_MIN_SECONDS_to_OCCASIONAL_WAIT_MAX_SECONDS()
+    {
+        var settings = await OccasionalSounds.SettingsAsync();
+        settings["OCCASIONAL_WAIT_MAX_SECONDS"] = "2";
+        await using var harness = await ServerHarness.StartAsync(settings);
+        TestDevice[] speakers = [await harness.AddDeviceAsync("0x0a0001"), await harness.AddDeviceAsync("0x0a0002")];
+        foreach (var speaker in speakers)
+            await speaker.ComeOnlineAsync();
+        // Longer than the longest wait, so waits counted from each moment's start would overlap
+        // two sounds.
+        await harness.UploadAsync("Swell", await Tracks.WhiteNoiseAsync("wav", TimeSpan.FromSeconds(2.5)));
+
+        await harness.SetOccasionalAsync("Swell");
+        var heard = await Task.WhenAll(speakers.Select(speaker => SoundsAsync(speaker, TimeSpan.FromSeconds(16))));
+
+        var sounds = heard.SelectMany(sounds => sounds).OrderBy(sound => sound[0].ReceivedAt).ToList();
+        Assert.True(sounds.Count >= 3, $"{sounds.Count} sounds played in 16 s.");
+        foreach (var sound in sounds)
+        {
+            var audio = TimeSpan.FromSeconds(
+                (double)sound.SkipLast(1).Sum(packet => packet.Payload.Length) / LivePlayback.Format.BytesPerSecond
+            );
+            Assert.InRange(sound[^1].ArrivedAfter(sound[0]), audio * 0.9, audio + TimeSpan.FromMilliseconds(250));
+        }
+        // The wait goes from a sound's last chunk to the next one's first, the decode within it.
+        for (var i = 1; i < sounds.Count; i++)
+            Assert.InRange(
+                sounds[i][0].ArrivedAfter(sounds[i - 1][^1]),
+                TimeSpan.FromSeconds(1) - TimeSpan.FromMilliseconds(20),
+                TimeSpan.FromSeconds(2.5)
+            );
+    }
+
+    // The sounds whose first packet arrives at the device within `during`, each its packets until
+    // none arrives for AmbientAudio.Quiet.
+    private static async Task<List<List<AudioPacket>>> SoundsAsync(TestDevice device, TimeSpan during)
+    {
+        var sounds = new List<List<AudioPacket>>();
+        var stopwatch = Stopwatch.StartNew();
+        while (during - stopwatch.Elapsed is { Ticks: > 0 } left && await device.NextPacketWithinAsync(left) is { } first)
+        {
+            var sound = new List<AudioPacket> { first };
+            sound.AddRange(await AmbientAudio.RestAsync(device));
+            sounds.Add(sound);
+        }
+        return sounds;
     }
 }
 

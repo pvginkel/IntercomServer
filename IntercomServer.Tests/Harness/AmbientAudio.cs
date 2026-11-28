@@ -168,10 +168,16 @@ internal static class AmbientAudio
     /// </summary>
     public static int FirstPacketOf(IReadOnlyList<AudioPacket> packets, short[] track)
     {
-        var index = packets.ToList().FindIndex(packet => Correlation(Samples([packet]), track) > 0.5);
+        var index = packets.ToList().FindIndex(packet => Begins(packet, track));
         Assert.True(index >= 0, "No packet begins a playback of the track.");
         return index;
     }
+
+    /// <summary>
+    /// Whether <paramref name="packet"/> begins a playback of <paramref name="track"/>: its samples
+    /// correlate with the track's first, at whatever level a fade-in or a gain has them.
+    /// </summary>
+    public static bool Begins(AudioPacket packet, short[] track) => Correlation(Samples([packet]), track) > 0.5;
 
     // The correlation of the samples with the track's first as many, independent of their levels:
     // about 0.87 for a linear ramp from silence, and a few hundredths for another track's noise.

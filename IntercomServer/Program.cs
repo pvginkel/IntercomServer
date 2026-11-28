@@ -46,6 +46,23 @@ internal partial class Program
             }
         }
 
+        // A setting's value, or a stop that names the setting: a value that is not of its form
+        // never runs on a default.
+        static TimeOnly TimeOfDay(string setting, string value) =>
+            TimeOnly.TryParseExact(value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time)
+                ? time
+                : throw new InvalidOperationException($"{setting} must be a time of day as hours and minutes, such as 08:00, not '{value}'.");
+
+        static int WholeSeconds(string setting, string value) =>
+            int.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var seconds)
+                ? seconds
+                : throw new InvalidOperationException($"{setting} must be a whole number of seconds, not '{value}'.");
+
+        static double Lufs(string setting, string value) =>
+            double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var loudness)
+                ? loudness
+                : throw new InvalidOperationException($"{setting} must be a loudness in LUFS, such as -20, not '{value}'.");
+
         // Fails fast on a fatal misconfiguration (see ChatGptConfiguration.Validate) before the
         // config is registered, so the host never starts in a broken state.
         static ChatGptConfiguration Validated(ChatGptConfiguration configuration)
@@ -135,6 +152,7 @@ internal partial class Program
                 // switch publishes their ends, while the server is still connected.
                 services.AddHostedService(p => p.GetRequiredService<AmbientSwitch>());
                 services.AddHostedService(p => p.GetRequiredService<AmbientPlayer>());
+                services.AddHostedService(p => p.GetRequiredService<OccasionalPlayer>());
                 services.AddSingleton(
                     new ServerConfiguration
                     {
@@ -172,6 +190,29 @@ internal partial class Program
                 };
                 ambientConfiguration.Validate(devicesConfiguration);
                 services.AddSingleton(ambientConfiguration);
+                var occasionalConfiguration = new OccasionalConfiguration
+                {
+                    WindowStart = env("OCCASIONAL_WINDOW_START") is { Length: > 0 } windowStart
+                        ? TimeOfDay("OCCASIONAL_WINDOW_START", windowStart)
+                        : new OccasionalConfiguration().WindowStart,
+                    WindowEnd = env("OCCASIONAL_WINDOW_END") is { Length: > 0 } windowEnd
+                        ? TimeOfDay("OCCASIONAL_WINDOW_END", windowEnd)
+                        : new OccasionalConfiguration().WindowEnd,
+                    ShortestWait = env("OCCASIONAL_WAIT_MIN_SECONDS") is { Length: > 0 } waitMin
+                        ? TimeSpan.FromSeconds(WholeSeconds("OCCASIONAL_WAIT_MIN_SECONDS", waitMin))
+                        : new OccasionalConfiguration().ShortestWait,
+                    LongestWait = env("OCCASIONAL_WAIT_MAX_SECONDS") is { Length: > 0 } waitMax
+                        ? TimeSpan.FromSeconds(WholeSeconds("OCCASIONAL_WAIT_MAX_SECONDS", waitMax))
+                        : new OccasionalConfiguration().LongestWait,
+                    ExcludedDevices = env("OCCASIONAL_EXCLUDED_DEVICES") is { Length: > 0 } excludedDevices
+                        ? excludedDevices.Split(',', StringSplitOptions.TrimEntries)
+                        : new OccasionalConfiguration().ExcludedDevices,
+                    Loudness = env("OCCASIONAL_LOUDNESS_LUFS") is { Length: > 0 } occasionalLoudness
+                        ? Lufs("OCCASIONAL_LOUDNESS_LUFS", occasionalLoudness)
+                        : new OccasionalConfiguration().Loudness,
+                };
+                occasionalConfiguration.Validate();
+                services.AddSingleton(occasionalConfiguration);
                 var doorbellConfiguration = new DoorbellConfiguration
                 {
                     ExtraDevices = env("DOORBELL_EXTRA_DEVICES") is { Length: > 0 } extraDevices
@@ -240,6 +281,7 @@ internal partial class Program
                 services.AddSingleton<PlaybackManager>();
                 services.AddSingleton<AmbientPlayer>();
                 services.AddSingleton<AmbientSwitch>();
+                services.AddSingleton<OccasionalPlayer>();
                 services.AddSingleton(new AudioDecoder("ffmpeg"));
                 services.AddSingleton<SoundLibrary>();
                 services.AddSingleton<AudioSender>();
