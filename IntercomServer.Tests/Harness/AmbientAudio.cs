@@ -80,12 +80,12 @@ internal static class AmbientAudio
 
     /// <summary>
     /// Asserts <paramref name="received"/> is one playback of <paramref name="track"/>, from the
-    /// track's start: the track looped without a gap at one gain, ramping up from silence over
-    /// its first <paramref name="fade"/> frames, and, when <paramref name="fadedOut"/>, down to
-    /// silence over its last. Each sample is within two of what that sends, the rounding of the
-    /// gain and of the ramp. Returns the gain in dB.
+    /// track's frame <paramref name="from"/>, its start by default: the track looped without a gap
+    /// at one gain, ramping up from silence over its first <paramref name="fade"/> frames, and,
+    /// when <paramref name="fadedOut"/>, down to silence over its last. Each sample is within two
+    /// of what that sends, the rounding of the gain and of the ramp. Returns the gain in dB.
     /// </summary>
-    public static double AssertOnePlayback(short[] received, short[] track, int fade, bool fadedOut)
+    public static double AssertOnePlayback(short[] received, short[] track, int fade, bool fadedOut, int from = 0)
     {
         var end = fadedOut ? received.Length - fade : received.Length;
         Assert.True(end > fade, $"The playback sent {received.Length} samples, too few to hold its fades and a stretch between.");
@@ -95,7 +95,7 @@ internal static class AmbientAudio
         double product = 0;
         for (var i = fade; i < end; i++)
         {
-            double sample = track[i % track.Length];
+            double sample = track[(from + i) % track.Length];
             power += sample * sample;
             product += received[i] * sample;
         }
@@ -107,7 +107,7 @@ internal static class AmbientAudio
                 i < fade ? (double)i / fade
                 : i >= end ? (double)(received.Length - i) / fade
                 : 1;
-            var sent = gain * track[i % track.Length] * level;
+            var sent = gain * track[(from + i) % track.Length] * level;
             if (Math.Abs(received[i] - sent) > 2)
                 Assert.Fail(
                     $"Sample {i} of {received.Length} is {received[i]}, where one playback of the track at a gain of {20 * Math.Log10(gain):0.00} dB sends {sent:0.0}."
@@ -116,6 +116,50 @@ internal static class AmbientAudio
 
         return 20 * Math.Log10(gain);
     }
+
+    /// <summary>
+    /// Where <paramref name="sound"/>, the PCM of another of the server's sounds, lies among
+    /// <paramref name="packets"/>: the index of the first packet that carries its start, and the
+    /// index after the run of packets that carry it on from there, from its start again after its
+    /// end when it is <paramref name="looped"/>. No packet of the noise a test plays carries a
+    /// sound's start, silence included.
+    /// </summary>
+    public static (int Start, int End) FindSound(IReadOnlyList<AudioPacket> packets, byte[] sound, bool looped)
+    {
+        var start = packets.ToList().FindIndex(packet => Carries(packet, sound, 0));
+        Assert.True(start >= 0, "No packet carries the sound's start.");
+
+        var end = start;
+        var offset = 0;
+        while (end < packets.Count)
+        {
+            if (looped && offset == sound.Length)
+                offset = 0;
+            if (!Carries(packets[end], sound, offset))
+                break;
+            offset += packets[end].Payload.Length;
+            end++;
+        }
+
+        return (start, end);
+    }
+
+    /// <summary>
+    /// The packets that arrive until one carries the start of <paramref name="sound"/>, that one
+    /// the last: once it has, the sound plays.
+    /// </summary>
+    public static async Task<List<AudioPacket>> UntilSoundAsync(TestDevice device, byte[] sound)
+    {
+        var packets = new List<AudioPacket>();
+        do
+            packets.Add(await device.NextPacketAsync());
+        while (!Carries(packets[^1], sound, 0));
+        return packets;
+    }
+
+    private static bool Carries(AudioPacket packet, byte[] sound, int offset) =>
+        offset + packet.Payload.Length <= sound.Length
+        && packet.Payload.SequenceEqual(sound.AsSpan(offset, packet.Payload.Length));
 
     /// <summary>
     /// The index of the first of <paramref name="packets"/> that begins a playback of

@@ -39,7 +39,10 @@ internal sealed record AmbientResult(string? Track, AmbientRefusal? Refusal, str
 /// it sends. It plays at the configured loudness, fades in, loops without a gap, and fades out at
 /// its stop: a stop through <see cref="StopAsync(Device)"/>, the cap, the device going offline or
 /// being removed, or the server's shutdown. Its stream runs the prebuffer ahead of real time. Each
-/// chunk goes to the endpoint the device advertises now. The player remembers, in memory only, the
+/// chunk goes to the endpoint the device advertises now. While another of the server's sounds
+/// plays to the device (<see cref="AudioSender.Interrupt"/>), the stream pauses: it sends nothing,
+/// and resumes where it stopped, with the fade-in, once the last of them has ended. A stop during
+/// a pause ends the playback with nothing more sent. The player remembers, in memory only, the
 /// track each device's latest playback played, which a pick at random skips.
 /// </summary>
 internal sealed class AmbientPlayer(
@@ -250,7 +253,7 @@ internal sealed class AmbientPlayer(
 
             Logger.Information("Ended ambient track {Track} on device {Device}", prepared.Track, device.DeviceId);
         }
-        // Only a start is abandoned: the stream itself waits on nothing a stop cancels.
+        // Only a start is abandoned: the stream ends at a stop without throwing.
         catch (OperationCanceledException) when (playback.Stop.IsCancellationRequested)
         {
             Logger.Information("A stop abandoned the start of the ambient sound on device {Device}", device.DeviceId);
@@ -379,8 +382,12 @@ internal sealed class AmbientPlayer(
     /// device holds the prebuffer after <see cref="LeadSpread"/>, and it then stays that far
     /// ahead. What the device still holds at the start, a previous playback's lead among it,
     /// counts toward the prebuffer. The level ramps up from silence over the fade, and, once a
-    /// stop has come, down to silence over the fade, after which the stream ends. It ends too
-    /// once the device advertises no endpoint, or another format.
+    /// stop has come, down to silence over the fade, after which the stream ends. A chunk the
+    /// sender refuses, another sound playing to the device, pauses the stream where it is, with
+    /// no fade-out. Once no other sound plays, it resumes from there as it starts: the fade-in,
+    /// and a lead topped up to the prebuffer, counting what the device still holds of that sound.
+    /// A stop during the pause, or a pause during the fade-out, ends the stream. It ends too once
+    /// the device advertises no endpoint, or another format.
     /// </summary>
     private async Task StreamAsync(Playback playback, byte[] pcm)
     {
@@ -391,22 +398,24 @@ internal sealed class AmbientPlayer(
         var chunkFrames = format.SampleRate * (int)Constants.AudioChunkSize.TotalMilliseconds / 1000;
         var chunk = new byte[chunkFrames * 2];
         var trackFrames = pcm.Length / 2;
-        // The lead this stream adds to what the device still holds, negative where that is more
-        // than the prebuffer.
-        var lead = configuration.Prebuffer.TotalSeconds - sender.Held(device.DeviceId).TotalSeconds;
         var spread = LeadSpread.TotalSeconds;
 
         var position = 0; // The frame of the track the next chunk starts at.
         long sent = 0; // The frames sent.
         long? fadingFrom = null; // The frames sent when the fade-out began.
         var fadingLevel = 1.0; // The level the fade-out began at.
+        // From the stream's start, and again from each resume: the frames sent then, the lead the
+        // stream adds to what the device still holds, negative where that is more than the
+        // prebuffer, and the time since.
+        long resumedAt = 0;
+        var lead = Lead();
         var stopwatch = Stopwatch.StartNew();
 
         while (true)
         {
             // When the chunk that starts at the audio sent is due: that audio less the lead, which
             // grows from none at the start to the stream's whole lead at the end of the spread.
-            var audio = (double)sent / format.SampleRate;
+            var audio = (double)(sent - resumedAt) / format.SampleRate;
             var due = Math.Max(audio - lead, audio * spread / (Math.Max(lead, 0) + spread));
             var delay = TimeSpan.FromSeconds(due) - stopwatch.Elapsed;
             if (delay.Ticks > 0)
@@ -432,20 +441,45 @@ internal sealed class AmbientPlayer(
                 return;
             }
 
+            var next = position;
             for (var i = 0; i < frames; i++)
             {
                 var frame = sent + i;
                 var level = fadingFrom is { } since ? fadingLevel * (since + fade - frame) / fade : FadeIn(frame);
-                var sample = BinaryPrimitives.ReadInt16LittleEndian(pcm.AsSpan(position * 2));
+                var sample = BinaryPrimitives.ReadInt16LittleEndian(pcm.AsSpan(next * 2));
                 BinaryPrimitives.WriteInt16LittleEndian(chunk.AsSpan(i * 2), (short)Math.Round(sample * level));
-                position = (position + 1) % trackFrames;
+                next = (next + 1) % trackFrames;
             }
 
-            sender.Send(device.DeviceId, endpoint, format, chunk.AsSpan(0, frames * 2));
+            if (!sender.SendUnlessInterrupted(device.DeviceId, endpoint, format, chunk.AsSpan(0, frames * 2)))
+            {
+                Logger.Information("Another sound plays on device {Device}, so its ambient sound pauses", device.DeviceId);
+                await sender
+                    .Uninterrupted(device.DeviceId)
+                    .WaitAsync(playback.Stop.Token)
+                    .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                // A stop that came before the pause or during it ends the stream with nothing more
+                // sent: the device plays the other sound, so there is nothing to fade.
+                if (playback.Stop.IsCancellationRequested)
+                {
+                    Logger.Information("A stop ended the paused ambient sound on device {Device}", device.DeviceId);
+                    return;
+                }
+
+                Logger.Information("The ambient sound on device {Device} resumes", device.DeviceId);
+                resumedAt = sent;
+                lead = Lead();
+                stopwatch.Restart();
+                continue;
+            }
+
+            position = next;
             sent += frames;
         }
 
-        double FadeIn(long frame) => frame < fade ? (double)frame / fade : 1;
+        double FadeIn(long frame) => frame - resumedAt < fade ? (double)(frame - resumedAt) / fade : 1;
+
+        double Lead() => configuration.Prebuffer.TotalSeconds - sender.Held(device.DeviceId).TotalSeconds;
     }
 
     /// <summary>
@@ -474,7 +508,7 @@ internal sealed class AmbientPlayer(
         /// <summary>Under the player's lock: the track, from the sound's start until the playback ends.</summary>
         public string? Track { get; set; }
 
-        /// <summary>Cancelled by a stop: it abandons the start, or fades the sound out.</summary>
+        /// <summary>Cancelled by a stop: it abandons the start, fades the sound out, or ends its pause.</summary>
         public CancellationTokenSource Stop { get; } = new();
 
         public TaskCompletionSource<AmbientResult> Started { get; } =

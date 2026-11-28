@@ -7,7 +7,7 @@ namespace IntercomServer;
 /// <summary>
 /// Plays the built-in sounds, a playback of its own on each device, in the format the device
 /// advertises: a sound started on some devices replaces what those devices were playing, and
-/// nothing else.
+/// nothing else. A device's ambient sound pauses from a sound's start to its end.
 /// </summary>
 internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
 {
@@ -56,6 +56,9 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
 
             var playback = CancellationTokenSource.CreateLinkedTokenSource(token);
             CancellationTokenSource? replaced;
+            // Taken ahead of the replaced sound's cancel, so the device's ambient sound stays
+            // paused from that sound to this one.
+            var interruption = sender.Interrupt(device.DeviceId);
 
             lock (_syncRoot)
             {
@@ -65,7 +68,7 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
 
             replaced?.Cancel();
 
-            RunPlayback(device.DeviceId, endpoint, format, fileName, configuration, playback.Token);
+            RunPlayback(device.DeviceId, endpoint, format, fileName, configuration, interruption, playback.Token);
         }
     }
 
@@ -75,6 +78,7 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
         AudioFormat format,
         string fileName,
         PlaybackConfiguration? configuration,
+        IDisposable interruption,
         CancellationToken cancellationToken
     )
     {
@@ -99,6 +103,10 @@ internal class PlaybackManager(AudioSender sender, SoundLibrary sounds)
         catch (Exception ex)
         {
             Logger.Error(ex, "Playback failed for device {Device}", deviceId);
+        }
+        finally
+        {
+            interruption.Dispose();
         }
     }
 }

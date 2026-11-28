@@ -12,8 +12,9 @@ namespace IntercomServer.Tests;
 /// Each sits well clear of 60 ms, since a loaded machine stretches both. An ambient playback alone
 /// runs ahead of real time: its prebuffer goes out over its first 100 ms, it then stays that far
 /// ahead, and its cap, counted in real time from its start, fades it out. One that starts while
-/// the device still holds what was sent before tops it up to the prebuffer. The class runs alone,
-/// after the suite's other tests, so their servers do not stretch it too.
+/// the device still holds what was sent before tops it up to the prebuffer, and so does one that
+/// resumes after another sound paused it, counting what the device still holds of that sound. The
+/// class runs alone, after the suite's other tests, so their servers do not stretch it too.
 /// </summary>
 [Collection(nameof(PacingTests))]
 public sealed class PacingTests
@@ -228,6 +229,83 @@ public sealed class PacingTests
         Assert.True(held.Max() <= prebuffer + 0.1, $"The device held {held.Max() * 1000:0} ms.");
         var end = held.TakeLast(AmbientAudio.Packets(TimeSpan.FromSeconds(0.5))).Max();
         Assert.True(end >= prebuffer - 0.1, $"The second playback kept the device {end * 1000:0} ms ahead.");
+    }
+
+    [Fact]
+    public async Task After_a_doorbell_the_ambient_sound_resumes_with_the_device_never_more_than_AMBIENT_PREBUFFER_MS_ahead()
+    {
+        await using var harness = await ServerHarness.StartAsync(
+            new Dictionary<string, string?> { ["DOORBELL_EXTRA_DEVICES"] = "0x0b0001" }
+        );
+        var toilet = await harness.AddToiletAsync("0x0b0001");
+        await harness.UploadAsync("Rain", await Tracks.WhiteNoiseAsync("wav", TimeSpan.FromSeconds(1)));
+        // Decoded ahead, the doorbell's first packet goes as the ambient sound pauses.
+        await BuiltInSounds.DecodedAsync(harness, Constants.AudioFiles.Doorbell, DeviceApi.ToiletFormat);
+
+        await harness.PlayAmbientAsync(toilet);
+        var packets = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(1)));
+        await harness.RingDoorbellAsync();
+        packets.AddRange(
+            await toilet.NextPacketsAsync(AmbientAudio.Packets(BuiltInSounds.DoorbellLength + TimeSpan.FromSeconds(2.5)))
+        );
+
+        // How far the audio the device has received, from the playback's first packet, through
+        // the doorbell and on past the resume, runs ahead of the time passed. The doorbell plays
+        // in real time behind the lead the ambient sound had sent, so the device still holds that
+        // lead at its end, and a fresh prebuffer on top would put it about twice as far ahead.
+        var received = 0.0;
+        var ahead = new List<double>();
+        foreach (var packet in packets)
+        {
+            received += (double)packet.Payload.Length / 2 / DeviceApi.ToiletFormat.SampleRate;
+            ahead.Add(received - packet.ArrivedAfter(packets[0]).TotalSeconds);
+        }
+        const double prebuffer = 0.5;
+        Assert.True(ahead.Max() <= prebuffer + 0.1, $"The device was {ahead.Max() * 1000:0} ms ahead.");
+        var end = ahead.TakeLast(AmbientAudio.Packets(TimeSpan.FromSeconds(0.5))).Min();
+        Assert.True(end >= prebuffer - 0.1, $"The resumed playback kept the device {end * 1000:0} ms ahead.");
+    }
+
+    [Fact]
+    public async Task After_a_pause_the_device_s_buffer_drained_in_the_ambient_sound_resumes_with_its_prebuffer_spread_over_about_100_ms()
+    {
+        await using var harness = await ServerHarness.StartAsync(
+            new Dictionary<string, string?> { ["AMBIENT_TOPIC_PREFIXES"] = TestDevice.IntercomPrefix }
+        );
+        var device = await harness.AddDeviceAsync("0x0a0001");
+        await device.ComeOnlineAsync();
+        await harness.AwaitDeviceAsync(device.DeviceId, listed => listed.Online);
+        await harness.UploadAsync("Rain", await Tracks.WhiteNoiseAsync("wav", TimeSpan.FromSeconds(1)));
+
+        await harness.PlayAmbientAsync(device);
+        var packets = await device.NextPacketsAsync(30);
+        // A ChatGPT conversation whose reply ends long before the conversation does.
+        await using (var reply = LivePlayback.Start(harness, device))
+        {
+            reply.Append(10);
+            await Task.Delay(TimeSpan.FromSeconds(1.5), TestContext.Current.CancellationToken);
+            await reply.CompleteAsync();
+        }
+        // What the stream had sent ahead, the reply, and a second and a half of the resumed sound,
+        // a packet each 20 ms.
+        packets.AddRange(await device.NextPacketsAsync(25 + 10 + 75));
+        var (_, end) = AmbientAudio.FindSound(packets, new byte[10 * LivePlayback.ChunkBytes], looped: false);
+        var resumed = packets.Skip(end).ToList();
+
+        // The resume sends the prebuffer over its first 100 ms, its end 83 ms in. Counted from the
+        // stream's start, the time paused would be owed and go out at once; with no lead, the
+        // prebuffer would arrive in its own time.
+        var prebuffer = TimeSpan.FromMilliseconds(500);
+        var spread = TimeSpan.FromMilliseconds(100);
+        var arrived = resumed[(int)(prebuffer / LivePlayback.ChunkLength)].ArrivedAfter(resumed[0]);
+        Assert.InRange(arrived, spread * 0.3, spread + TimeSpan.FromMilliseconds(150));
+        var lead = resumed
+            .Select((packet, i) => i * LivePlayback.ChunkLength - packet.ArrivedAfter(resumed[0]))
+            .Max();
+        Assert.True(
+            lead <= prebuffer + TimeSpan.FromMilliseconds(100),
+            $"The resumed stream went {lead.TotalMilliseconds:0} ms ahead of real time."
+        );
     }
 
     [Fact]

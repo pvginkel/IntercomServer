@@ -824,6 +824,9 @@ internal sealed class Conversation
 
     private async Task RunAudioPump()
     {
+        // The device's ambient sound pauses while the pump runs: from the conversation's start to
+        // its end, between the replies too.
+        using var interruption = _audioSender.Interrupt(Device.DeviceId);
         try
         {
             await AudioStreaming.PlayAsync(

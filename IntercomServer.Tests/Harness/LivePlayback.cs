@@ -8,10 +8,11 @@ namespace IntercomServer.Tests.Harness;
 /// <summary>
 /// The path a ChatGPT reply takes to a device, with the test in OpenAI's place: the ChatGPT
 /// bridge's <see cref="LiveAudioStream"/>, played by <see cref="AudioStreaming.PlayAsync"/>
-/// through the server's own <see cref="AudioSender"/> under the device's id, as
-/// <c>Conversation</c> plays it, in mono 16 kHz 16-bit, which every device in production
-/// plays. It is the one source the server has that blocks, so it is how a test shows a late
-/// chunk or a stall. The stream has no pre-roll, so audio leaves as soon as the test appends it.
+/// through the server's own <see cref="AudioSender"/> under the device's id, the device's ambient
+/// sound paused from the stream's start to its end, as <c>Conversation</c> plays it, in mono
+/// 16 kHz 16-bit, which every device in production plays. It is the one source the server has
+/// that blocks, so it is how a test shows a late chunk or a stall. The stream has no pre-roll, so
+/// audio leaves as soon as the test appends it.
 /// </summary>
 internal sealed class LivePlayback : IAsyncDisposable
 {
@@ -28,15 +29,13 @@ internal sealed class LivePlayback : IAsyncDisposable
 
     private LivePlayback(AudioSender sender, string deviceId, IPEndPoint endpoint)
     {
-        _playing = AudioStreaming.PlayAsync(
-            sender,
-            deviceId,
-            endpoint,
-            Format,
-            _stream,
-            configuration: null,
-            _stopping.Token
-        );
+        _playing = PlayAsync(sender, deviceId, endpoint);
+    }
+
+    private async Task PlayAsync(AudioSender sender, string deviceId, IPEndPoint endpoint)
+    {
+        using var interruption = sender.Interrupt(deviceId);
+        await AudioStreaming.PlayAsync(sender, deviceId, endpoint, Format, _stream, configuration: null, _stopping.Token);
     }
 
     /// <summary>Starts playing to <paramref name="device"/>'s endpoint; nothing goes out until audio is appended.</summary>
