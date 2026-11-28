@@ -305,7 +305,9 @@ public sealed class DecodingTests
         Assert.Single(ffmpeg.Processes());
         await abandon.CancelAsync();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => decoding);
+        // A decode that waited on an FFmpeg it did not kill would wait for good: FFmpeg blocks on
+        // an output nobody reads once the decode is abandoned. The bound fails this test instead.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => decoding.WaitAsync(Timeouts.Observe));
         Assert.Empty(ffmpeg.Processes());
     }
 
