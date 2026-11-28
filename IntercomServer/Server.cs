@@ -14,7 +14,8 @@ internal class Server(
     DeviceManager devices,
     StateManager state,
     AlarmManager alarmManager,
-    PlaybackManager playbackManager
+    PlaybackManager playbackManager,
+    AmbientPlayer ambientPlayer
 ) : IAsyncDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<Server>();
@@ -323,6 +324,7 @@ internal class Server(
                     device.State
                 );
 
+                ambientPlayer.HandleDeviceState(device);
                 await state.HandleDeviceState(device);
                 break;
 

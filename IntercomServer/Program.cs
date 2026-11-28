@@ -162,6 +162,12 @@ internal partial class Program
                     Fade = env("AMBIENT_FADE_MS") is { Length: > 0 } fadeMs
                         ? TimeSpan.FromMilliseconds(int.Parse(fadeMs, CultureInfo.InvariantCulture))
                         : new AmbientConfiguration().Fade,
+                    Prebuffer = env("AMBIENT_PREBUFFER_MS") is { Length: > 0 } prebufferMs
+                        ? TimeSpan.FromMilliseconds(int.Parse(prebufferMs, CultureInfo.InvariantCulture))
+                        : new AmbientConfiguration().Prebuffer,
+                    Cap = env("AMBIENT_CAP_SECONDS") is { Length: > 0 } capSeconds
+                        ? TimeSpan.FromSeconds(int.Parse(capSeconds, CultureInfo.InvariantCulture))
+                        : new AmbientConfiguration().Cap,
                 };
                 ambientConfiguration.Validate(devicesConfiguration);
                 services.AddSingleton(ambientConfiguration);

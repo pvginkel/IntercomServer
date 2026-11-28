@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Runtime.Versioning;
@@ -11,7 +12,8 @@ namespace IntercomServer.Tests;
 /// listener. A playback is one track, decoded once by the real FFmpeg into the device's format:
 /// at the loudness target, its peak held below −1 dBFS, faded in over half a second, looped
 /// without a gap on the device's counter, and faded out over half a second at its stop, after
-/// which nothing more is sent. It plays its own copy of the track, follows the endpoint the device
+/// which nothing more is sent: a stop by the routes, the device going offline or being removed,
+/// or the server's shutdown, which waits for every fade-out. It plays its own copy of the track, follows the endpoint the device
 /// advertises, and is the device's only one. A start without a track picks an enabled one at
 /// random, never the one the device last played unless it is the only one, and nothing of a
 /// playback is written anywhere.
@@ -406,6 +408,85 @@ public sealed class AmbientPlayerTests
         Assert.NotNull(await playing.NextPacketWithinAsync(AmbientAudio.Quiet));
         Assert.Null((await harness.AwaitDeviceAsync(stopped.DeviceId, _ => true)).Track);
         Assert.Equal("Snow", (await harness.AwaitDeviceAsync(playing.DeviceId, _ => true)).Track);
+    }
+
+    [Theory]
+    [InlineData("offline")]
+    [InlineData("configuration")]
+    [InlineData("state")]
+    public async Task A_device_that_goes_offline_or_is_removed_by_an_empty_configuration_or_state_has_its_playback_faded_out(
+        string end
+    )
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        var toilet = await harness.AddToiletAsync("0x0b0001");
+        var rain = await Tracks.WhiteNoiseAsync("wav", TrackLength);
+        await harness.UploadAsync("Rain", rain);
+        var track = await AmbientAudio.DecodedAsync(rain, DeviceApi.ToiletFormat);
+
+        await harness.PlayAmbientAsync(toilet);
+        var packets = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.6)));
+        await (
+            end switch
+            {
+                "offline" => toilet.PublishStateAsync(online: false),
+                "configuration" => toilet.PublishConfigurationAsync(null),
+                _ => toilet.PublishAsync("state", null, retain: true),
+            }
+        );
+        packets.AddRange(await AmbientAudio.RestAsync(toilet));
+
+        AmbientAudio.AssertNumbered(packets, first: 0);
+        AmbientAudio.AssertOnePlayback(AmbientAudio.Samples(packets), track, AmbientAudio.Fade, fadedOut: true);
+
+        // Back, the device gets a playback of its own, from its fade-in: a start that found the
+        // stopped one would join it.
+        await toilet.PublishConfigurationAsync(DeviceApi.ToiletConfiguration(toilet));
+        await toilet.PublishStateAsync();
+        Assert.Null((await harness.AwaitDeviceAsync(toilet.DeviceId, device => device.Online)).Track);
+        await harness.PlayAmbientAsync(toilet);
+        var again = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.6)));
+        await harness.EndAmbientAsync(toilet);
+        again.AddRange(await AmbientAudio.RestAsync(toilet));
+
+        AmbientAudio.AssertNumbered(again, first: packets.Count);
+        AmbientAudio.AssertOnePlayback(AmbientAudio.Samples(again), track, AmbientAudio.Fade, fadedOut: true);
+    }
+
+    [Fact]
+    public async Task The_server_s_shutdown_fades_out_every_playback_and_waits_for_it()
+    {
+        await using var harness = await ServerHarness.StartAsync();
+        TestDevice[] toilets = [await harness.AddToiletAsync("0x0b0001"), await harness.AddToiletAsync("0x0b0002")];
+        var rain = await Tracks.WhiteNoiseAsync("wav", TrackLength);
+        await harness.UploadAsync("Rain", rain);
+        var track = await AmbientAudio.DecodedAsync(rain, DeviceApi.ToiletFormat);
+
+        var packets = new Dictionary<TestDevice, List<AudioPacket>>();
+        foreach (var toilet in toilets)
+            await harness.PlayAmbientAsync(toilet);
+        foreach (var toilet in toilets)
+            packets[toilet] = await toilet.NextPacketsAsync(AmbientAudio.Packets(TimeSpan.FromSeconds(0.6)));
+        await harness.StopServerAsync();
+        var stopped = Stopwatch.GetTimestamp();
+
+        foreach (var toilet in toilets)
+        {
+            var rest = await AmbientAudio.RestAsync(toilet);
+            // The fade-out takes half a second to go out: nothing comes after the stop returned
+            // but what was then on its way.
+            Assert.All(
+                rest,
+                packet => Assert.True(
+                    Stopwatch.GetElapsedTime(stopped, packet.ReceivedAt) < TimeSpan.FromMilliseconds(100),
+                    $"A packet to device {toilet.DeviceId} arrived {Stopwatch.GetElapsedTime(stopped, packet.ReceivedAt).TotalMilliseconds:0} ms after the shutdown returned."
+                )
+            );
+            packets[toilet].AddRange(rest);
+
+            AmbientAudio.AssertNumbered(packets[toilet], first: 0);
+            AmbientAudio.AssertOnePlayback(AmbientAudio.Samples(packets[toilet]), track, AmbientAudio.Fade, fadedOut: true);
+        }
     }
 
     // Every file under the data volume, with its length and its last write.

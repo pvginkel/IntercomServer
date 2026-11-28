@@ -25,6 +25,7 @@ internal sealed class ServerHarness : IAsyncDisposable
     private readonly IHost _host;
     private readonly IMqttClient _homeAssistant;
     private readonly List<TestDevice> _devices = [];
+    private bool _serverStopped;
 
     private ServerHarness(
         TestBroker broker,
@@ -229,6 +230,16 @@ internal sealed class ServerHarness : IAsyncDisposable
         );
     }
 
+    /// <summary>
+    /// Stops the server as a pod's stop does, and returns once it has stopped. The broker, the
+    /// realm and the devices stay up until the harness is disposed.
+    /// </summary>
+    public async Task StopServerAsync()
+    {
+        _serverStopped = true;
+        await _host.StopAsync();
+    }
+
     /// <summary>Asks the server's health endpoint, as Kubernetes' probes do.</summary>
     public async Task<(HttpStatusCode Status, string Body)> GetHealthAsync(string path)
     {
@@ -277,7 +288,8 @@ internal sealed class ServerHarness : IAsyncDisposable
         await _homeAssistant.DisconnectAsync();
         _homeAssistant.Dispose();
 
-        await _host.StopAsync();
+        if (!_serverStopped)
+            await _host.StopAsync();
         await ((IAsyncDisposable)_host).DisposeAsync();
 
         await Broker.DisposeAsync();

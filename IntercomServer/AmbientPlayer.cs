@@ -37,17 +37,23 @@ internal sealed record AmbientResult(string? Track, AmbientRefusal? Refusal, str
 /// most one playback on each, kept by device id. A playback is one track, decoded once by FFmpeg
 /// into the device's format and held in memory, so a change to the track's file changes nothing
 /// it sends. It plays at the configured loudness, fades in, loops without a gap, and fades out at
-/// its stop. Each chunk goes to the endpoint the device advertises now. The player remembers, in
-/// memory only, the track each device's latest playback played, which a pick at random skips.
+/// its stop: a stop through <see cref="StopAsync(Device)"/>, the cap, the device going offline or
+/// being removed, or the server's shutdown. Its stream runs the prebuffer ahead of real time. Each
+/// chunk goes to the endpoint the device advertises now. The player remembers, in memory only, the
+/// track each device's latest playback played, which a pick at random skips.
 /// </summary>
 internal sealed class AmbientPlayer(
     AmbientConfiguration configuration,
     TrackStore tracks,
     AudioDecoder decoder,
-    AudioSender sender
+    AudioSender sender,
+    DeviceManager devices
 ) : IHostedService
 {
     private static readonly ILogger Logger = Log.ForContext<AmbientPlayer>();
+
+    // How long the stream takes, from its start, to get the prebuffer ahead of real time.
+    private static readonly TimeSpan LeadSpread = TimeSpan.FromMilliseconds(100);
 
     // The level, in dBFS, the gain holds a track's peak at.
     private const double PeakCeiling = -1;
@@ -63,7 +69,11 @@ internal sealed class AmbientPlayer(
     private readonly Dictionary<string, Playback> _playbacks = new();
     private readonly Dictionary<string, string> _lastPlayed = new();
 
-    Task IHostedService.StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    Task IHostedService.StartAsync(CancellationToken cancellationToken)
+    {
+        devices.DeviceRemoved += (_, e) => Stop(e.Device);
+        return Task.CompletedTask;
+    }
 
     /// <summary>Stops every playback as <see cref="StopAsync(Device)"/> does, and waits for each to end.</summary>
     async Task IHostedService.StopAsync(CancellationToken cancellationToken)
@@ -135,20 +145,37 @@ internal sealed class AmbientPlayer(
     /// the one it replaced, has ended: one that is playing fades out, and a start that has not yet
     /// begun its sound is abandoned, its decode with it.
     /// </summary>
-    public async Task StopAsync(Device device)
+    public Task StopAsync(Device device) => Stop(device)?.Ended.Task ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Stops the ambient sound on <paramref name="device"/>, as <see cref="StopAsync(Device)"/>
+    /// does, once it is no longer online. It does not wait for the playback's end: the MQTT
+    /// handler that calls it holds up every other message while it runs.
+    /// </summary>
+    public void HandleDeviceState(Device device)
+    {
+        if (device.State?.Online != true)
+            Stop(device);
+    }
+
+    // Stops the device's playback, if it has one, and returns it.
+    private Playback? Stop(Device device)
     {
         Playback? playback;
         lock (_syncRoot)
-        {
-            if (_playbacks.TryGetValue(device.DeviceId, out playback))
-                playback.Stopping = true;
-        }
+            playback = _playbacks.GetValueOrDefault(device.DeviceId);
 
-        if (playback == null)
-            return;
+        if (playback != null)
+            Stop(playback);
+        return playback;
+    }
 
-        await playback.Stop.CancelAsync();
-        await playback.Ended.Task;
+    // Marks the playback stopping, so a start makes a new one, then cancels its Stop.
+    private void Stop(Playback playback)
+    {
+        lock (_syncRoot)
+            playback.Stopping = true;
+        _ = playback.Stop.CancelAsync();
     }
 
     // Whether the player can play on the device, in the format it sends it, or why not.
@@ -210,7 +237,8 @@ internal sealed class AmbientPlayer(
             );
             playback.Started.SetResult(AmbientResult.Playing(prepared.Track));
 
-            await StreamAsync(playback, prepared.Pcm);
+            using (new Timer(_ => Cap(playback), null, configuration.Cap, Timeout.InfiniteTimeSpan))
+                await StreamAsync(playback, prepared.Pcm);
 
             Logger.Information("Ended ambient track {Track} on device {Device}", prepared.Track, device.DeviceId);
         }
@@ -300,6 +328,16 @@ internal sealed class AmbientPlayer(
         return new Prepared(track.Name, measured.Pcm, gain);
     }
 
+    private void Cap(Playback playback)
+    {
+        Logger.Information(
+            "The ambient playback on device {Device} has played for {Cap}, its cap, and stops",
+            playback.Device.DeviceId,
+            configuration.Cap
+        );
+        Stop(playback);
+    }
+
     private static Prepared? Refused(Playback playback, AmbientResult refused)
     {
         playback.Started.SetResult(refused);
@@ -324,10 +362,12 @@ internal sealed class AmbientPlayer(
     }
 
     /// <summary>
-    /// Sends <paramref name="pcm"/>, looped, in chunks of <see cref="Constants.AudioChunkSize"/>
-    /// paced to real time, each filled across the loop's seam. The level ramps up from silence
-    /// over the fade, and, once a stop has come, down to silence over the fade, after which the
-    /// stream ends. It ends too once the device advertises no endpoint, or another format.
+    /// Sends <paramref name="pcm"/>, looped, in chunks of <see cref="Constants.AudioChunkSize"/>,
+    /// each filled across the loop's seam. The first chunks go faster than real time, until the
+    /// stream is the prebuffer ahead of it after <see cref="LeadSpread"/>, and it then stays that
+    /// far ahead. The level ramps up from silence over the fade, and, once a stop has come, down
+    /// to silence over the fade, after which the stream ends. It ends too once the device
+    /// advertises no endpoint, or another format.
     /// </summary>
     private async Task StreamAsync(Playback playback, byte[] pcm)
     {
@@ -338,6 +378,8 @@ internal sealed class AmbientPlayer(
         var chunkFrames = format.SampleRate * (int)Constants.AudioChunkSize.TotalMilliseconds / 1000;
         var chunk = new byte[chunkFrames * 2];
         var trackFrames = pcm.Length / 2;
+        var prebuffer = configuration.Prebuffer.TotalSeconds;
+        var spread = LeadSpread.TotalSeconds;
 
         var position = 0; // The frame of the track the next chunk starts at.
         long sent = 0; // The frames sent.
@@ -379,7 +421,11 @@ internal sealed class AmbientPlayer(
             sender.Send(device.DeviceId, endpoint, format, chunk.AsSpan(0, frames * 2));
             sent += frames;
 
-            var delay = TimeSpan.FromSeconds((double)sent / format.SampleRate) - stopwatch.Elapsed;
+            // When the next chunk is due: the audio sent less the lead, which grows from none at
+            // the start to the prebuffer at the end of the spread.
+            var audio = (double)sent / format.SampleRate;
+            var due = Math.Max(audio - prebuffer, audio * spread / (prebuffer + spread));
+            var delay = TimeSpan.FromSeconds(due) - stopwatch.Elapsed;
             if (delay.Ticks > 0)
                 await Task.Delay(delay);
         }

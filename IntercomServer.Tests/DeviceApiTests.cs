@@ -320,6 +320,9 @@ public sealed class DeviceApiTests
     [InlineData("AMBIENT_LOUDNESS_LUFS", "NaN", "AMBIENT_LOUDNESS_LUFS must be a loudness in LUFS.")]
     [InlineData("AMBIENT_LOUDNESS_LUFS", "-Infinity", "AMBIENT_LOUDNESS_LUFS must be a loudness in LUFS.")]
     [InlineData("AMBIENT_FADE_MS", "-1", "AMBIENT_FADE_MS must be 0 or more milliseconds.")]
+    [InlineData("AMBIENT_PREBUFFER_MS", "-1", "AMBIENT_PREBUFFER_MS must be 0 or more milliseconds.")]
+    [InlineData("AMBIENT_CAP_SECONDS", "0", "AMBIENT_CAP_SECONDS must be from 1 to 4294967 seconds.")]
+    [InlineData("AMBIENT_CAP_SECONDS", "4294968", "AMBIENT_CAP_SECONDS must be from 1 to 4294967 seconds.")]
     public async Task A_setting_the_player_cannot_play_by_stops_the_start(string setting, string value, string message)
     {
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>

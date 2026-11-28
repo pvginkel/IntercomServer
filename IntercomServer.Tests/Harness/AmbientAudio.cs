@@ -21,11 +21,17 @@ internal static class AmbientAudio
     /// <summary>The datagrams of <paramref name="length"/> of audio to a ToiletAutomation device: two each 20 ms.</summary>
     public static int Packets(TimeSpan length) => (int)(length.TotalSeconds * 100);
 
-    /// <summary>The packets that arrive until none has for <see cref="Quiet"/>.</summary>
+    /// <summary>
+    /// The packets that arrive until none has for <see cref="Quiet"/>, or until more than five
+    /// seconds of audio has come: a playback that plays on fails its test instead of holding it up.
+    /// </summary>
     public static async Task<List<AudioPacket>> RestAsync(TestDevice device)
     {
         var packets = new List<AudioPacket>();
-        while (await device.NextPacketWithinAsync(Quiet) is { } packet)
+        while (
+            packets.Count <= Packets(TimeSpan.FromSeconds(5))
+            && await device.NextPacketWithinAsync(Quiet) is { } packet
+        )
             packets.Add(packet);
         return packets;
     }
