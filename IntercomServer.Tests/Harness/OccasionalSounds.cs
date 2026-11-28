@@ -1,4 +1,5 @@
 using System.Globalization;
+using IntercomServer.Utils.Audio;
 
 namespace IntercomServer.Tests.Harness;
 
@@ -60,6 +61,67 @@ internal static class OccasionalSounds
     {
         var result = await harness.TrackStore().UpdateAsync(name, null, TrackState.Occasional, TestContext.Current.CancellationToken);
         Assert.NotNull(result.Track);
+    }
+
+    /// <summary>
+    /// Uploads a track of white noise <paramref name="length"/> long for each of
+    /// <paramref name="names"/>, seeded 1, 2 and on in their order, and returns each, by name, as
+    /// the real FFmpeg decodes it into <paramref name="format"/>.
+    /// </summary>
+    public static async Task<Dictionary<string, short[]>> UploadNoiseAsync(
+        this ServerHarness harness,
+        AudioFormat format,
+        TimeSpan length,
+        params string[] names
+    )
+    {
+        var tracks = new Dictionary<string, short[]>();
+        for (var i = 0; i < names.Length; i++)
+        {
+            var noise = await Tracks.WhiteNoiseAsync("wav", length, seed: i + 1);
+            await harness.UploadAsync(names[i], noise);
+            tracks[names[i]] = await AmbientAudio.DecodedAsync(noise, format);
+        }
+        return tracks;
+    }
+
+    /// <summary>
+    /// The packets that arrive at <paramref name="device"/> before the next sound of one of
+    /// <paramref name="tracks"/>, and that sound's: from the packet that begins it until none
+    /// arrives for <see cref="AmbientAudio.Quiet"/>.
+    /// </summary>
+    public static async Task<(List<AudioPacket> Before, List<AudioPacket> Sound)> UntilNextSoundAsync(
+        TestDevice device,
+        IReadOnlyDictionary<string, short[]> tracks
+    )
+    {
+        var before = new List<AudioPacket>();
+        while (true)
+        {
+            var packet = await device.NextPacketAsync();
+            if (tracks.Values.Any(track => AmbientAudio.Begins(packet, track)))
+                return (before, [packet, .. await AmbientAudio.RestAsync(device)]);
+            before.Add(packet);
+        }
+    }
+
+    /// <summary>
+    /// Asserts <paramref name="sound"/> is one sound of <paramref name="track"/> from its start,
+    /// ended before half of it had played: a sound that gave way.
+    /// </summary>
+    public static void AssertCutShort(IReadOnlyList<AudioPacket> sound, short[] track)
+    {
+        var samples = AmbientAudio.Samples(sound);
+        Assert.True(samples.Length < track.Length / 2, $"The sound sent {samples.Length} of the track's {track.Length} samples.");
+        AmbientAudio.AssertOnePlayback(samples, track, fade: 0, fadedOut: false);
+    }
+
+    /// <summary>Asserts <paramref name="sound"/> is one whole sound of <paramref name="track"/>, from its start to its end.</summary>
+    public static void AssertWhole(IReadOnlyList<AudioPacket> sound, short[] track)
+    {
+        var samples = AmbientAudio.Samples(sound);
+        Assert.Equal(track.Length, samples.Length);
+        AmbientAudio.AssertOnePlayback(samples, track, fade: 0, fadedOut: false);
     }
 
     /// <summary>

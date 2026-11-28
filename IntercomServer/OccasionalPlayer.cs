@@ -17,11 +17,13 @@ namespace IntercomServer;
 /// round starts, whose first is not the last one played unless it is the only one. The round is
 /// held in memory only. A speaker is a device the server knows, online, advertising an endpoint
 /// and a format the server can send, and not excluded; it is idle with no ambient playback, no
-/// sound <see cref="AudioSender.Interrupt"/> marked and no ChatGPT conversation. The sound is the
-/// track decoded into the speaker's format and levelled as the ambient sound is, sent once in
-/// real time, each chunk to the endpoint the device advertises now; it ends early once the device
-/// is offline or removed, advertises no endpoint or another format, or the server stops, whose
-/// shutdown waits for it.
+/// sound <see cref="AudioSender.Interrupt"/> marked, no ChatGPT conversation, and not calling,
+/// ringing or in a call. The sound is the track decoded into the speaker's format and levelled as
+/// the ambient sound is, sent once in real time, each chunk to the endpoint the device advertises
+/// now; it ends early once the device is offline or removed, advertises no endpoint or another
+/// format, or the server stops, whose shutdown waits for it. It gives way: it ends, not to resume,
+/// with nothing more sent, once its speaker is idle no more, and at once at an ambient start on
+/// its speaker, refused or not. Its track has had its turn in the round all the same.
 /// </summary>
 internal sealed class OccasionalPlayer(
     OccasionalConfiguration configuration,
@@ -30,13 +32,20 @@ internal sealed class OccasionalPlayer(
     AudioSender sender,
     DeviceManager devices,
     AmbientPlayer ambient,
-    ConversationManager conversations
+    ConversationManager conversations,
+    StateManager state
 ) : IHostedService
 {
     private static readonly ILogger Logger = Log.ForContext<OccasionalPlayer>();
 
     private readonly CancellationTokenSource _stopping = new();
     private Task _moments = Task.CompletedTask;
+
+    // Under the lock: the device the latest moment drew, and whether an ambient start has come to
+    // it since. A chunk is checked and sent under it too, so none goes out once a start has come.
+    private readonly Lock _syncRoot = new();
+    private Device? _speaker;
+    private bool _gaveWay;
 
     // Read and written only by the moments, one after another: the names played in this round,
     // ignoring case, as a name is unique in the store; and the last one played.
@@ -45,6 +54,14 @@ internal sealed class OccasionalPlayer(
 
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
+        ambient.Starting += (_, e) =>
+        {
+            lock (_syncRoot)
+            {
+                if (_speaker?.DeviceId == e.Device.DeviceId)
+                    _gaveWay = true;
+            }
+        };
         _moments = RunAsync(_stopping.Token);
         return Task.CompletedTask;
     }
@@ -88,18 +105,24 @@ internal sealed class OccasionalPlayer(
         if (await tracks.OpenAsync(Pick, stopping) is not var (track, audio))
             return;
 
-        Speaker speaker;
+        Speaker? speaker;
         MeasuredAudio measured;
         await using (audio)
         {
-            var idle = Speakers().Where(candidate => Idle(candidate.Device)).ToList();
-            if (idle.Count == 0)
+            lock (_syncRoot)
+            {
+                var idle = Speakers().Where(candidate => Idle(candidate.Device)).ToList();
+                speaker = idle.Count == 0 ? null : idle[Random.Shared.Next(idle.Count)];
+                _speaker = speaker?.Device;
+                _gaveWay = false;
+            }
+
+            if (speaker == null)
             {
                 Logger.Information("No speaker is idle, so this moment plays no occasional sound");
                 return;
             }
 
-            speaker = idle[Random.Shared.Next(idle.Count)];
             _played.Add(track.Name);
             _lastPlayed = track.Name;
 
@@ -178,17 +201,21 @@ internal sealed class OccasionalPlayer(
     }
 
     // A ChatGPT conversation marks its sound only once its session with OpenAI is up, so the
-    // conversation is asked too.
+    // conversation is asked too; and a call's audio goes from device to device, marked by
+    // nothing the sender holds, so the call state is asked too.
     private bool Idle(Device device) =>
         !ambient.HasPlayback(device)
         && sender.Uninterrupted(device.DeviceId).IsCompleted
-        && !conversations.IsChatting(device);
+        && !conversations.IsChatting(device)
+        && !state.TakesPartInCall(device);
 
     /// <summary>
     /// Sends <paramref name="pcm"/> once, in chunks of <see cref="Constants.AudioChunkSize"/>,
     /// paced in real time from the first, each to the endpoint the device advertises now. It ends
     /// early, with the rest unsent, once the device is offline or removed, advertises no endpoint
-    /// or another format, or the server stops.
+    /// or another format, is idle no more or has had an ambient start, or the server stops. Each
+    /// chunk is refused once another sound <see cref="AudioSender.Interrupt"/> marks plays to the
+    /// device, so none of it goes out after that sound's start.
     /// </summary>
     private async Task StreamAsync(Speaker speaker, byte[] pcm, CancellationToken stopping)
     {
@@ -232,7 +259,23 @@ internal sealed class OccasionalPlayer(
                 return;
             }
 
-            sender.Send(device.DeviceId, endpoint, format, pcm.AsSpan(offset, Math.Min(chunkBytes, pcm.Length - offset)));
+            bool sent;
+            lock (_syncRoot)
+                sent =
+                    !_gaveWay
+                    && Idle(device)
+                    && sender.SendUnlessInterrupted(
+                        device.DeviceId,
+                        endpoint,
+                        format,
+                        pcm.AsSpan(offset, Math.Min(chunkBytes, pcm.Length - offset))
+                    );
+
+            if (!sent)
+            {
+                Logger.Information("Device {Device} is busy, so its occasional sound gives way", device.DeviceId);
+                return;
+            }
         }
     }
 

@@ -72,6 +72,13 @@ internal sealed class AmbientPlayer(
     /// </summary>
     public event EventHandler<DeviceEventArgs>? PlayingChanged;
 
+    /// <summary>
+    /// Raised, with the device, as a start makes a playback for it, ahead of the playback's
+    /// decode and its sound, whether or not it then plays. A handler runs on the start's caller,
+    /// and must neither block nor throw.
+    /// </summary>
+    public event EventHandler<DeviceEventArgs>? Starting;
+
     Task IHostedService.StartAsync(CancellationToken cancellationToken)
     {
         devices.DeviceRemoved += (_, e) => Stop(e.Device);
@@ -148,7 +155,10 @@ internal sealed class AmbientPlayer(
         }
 
         if (starting)
+        {
+            Starting?.Invoke(this, new DeviceEventArgs(device));
             _ = RunAsync(playback);
+        }
 
         return await playback.Started.Task.WaitAsync(cancellationToken);
     }

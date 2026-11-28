@@ -9,6 +9,9 @@ internal class StateManager
 {
     private static readonly ILogger Logger = Log.ForContext<StateManager>();
 
+    // Under the lock: every write of the call state, _callingDevice, _ringing and _inCall, so
+    // that TakesPartInCall reads it whole from any thread.
+    private readonly Lock _callState = new();
     private Device? _callingDevice;
     private readonly List<Device> _ringing = [];
     private IDisposable? _callingAlarm;
@@ -45,7 +48,8 @@ internal class StateManager
 
         _devices.DeviceRemoved += async (_, e) =>
         {
-            _ringing.Remove(e.Device);
+            lock (_callState)
+                _ringing.Remove(e.Device);
 
             await StopChat(e.Device);
 
@@ -58,6 +62,13 @@ internal class StateManager
                 Logger.Error(ex, "Failed to leave call");
             }
         };
+    }
+
+    /// <summary>Whether <paramref name="device"/> is calling, ringing or in a call. Safe to call from any thread.</summary>
+    public bool TakesPartInCall(Device device)
+    {
+        lock (_callState)
+            return _callingDevice == device || _ringing.Contains(device) || _inCall.Contains(device);
     }
 
     // A device that has gone offline (typically surfaced by its retained last-will state
@@ -190,10 +201,13 @@ internal class StateManager
         Logger.Information("Device {Device} requested a call", device.DeviceId);
 
         // A device that is in a ChatGPT conversation is busy and is not rung.
-        _ringing.Clear();
-        _ringing.AddRange(
-            _devices.GetAllCallCapable().Where(p => p != device && !_conversation.IsChatting(p))
-        );
+        lock (_callState)
+        {
+            _ringing.Clear();
+            _ringing.AddRange(
+                _devices.GetAllCallCapable().Where(p => p != device && !_conversation.IsChatting(p))
+            );
+        }
 
         if (_ringing.Count == 0)
         {
@@ -201,7 +215,8 @@ internal class StateManager
             return;
         }
 
-        _callingDevice = device;
+        lock (_callState)
+            _callingDevice = device;
 
         if (IsAutoAccept)
         {
@@ -272,8 +287,11 @@ internal class StateManager
 
     private void StopRinging()
     {
-        _callingDevice = null;
-        _ringing.Clear();
+        lock (_callState)
+        {
+            _callingDevice = null;
+            _ringing.Clear();
+        }
 
         if (_ringingPlayback != null)
         {
@@ -299,7 +317,8 @@ internal class StateManager
         await device.SetGreenLed(_client, Constants.LedOn);
         await device.SetRecording(_client, true);
 
-        _inCall.Add(device);
+        lock (_callState)
+            _inCall.Add(device);
     }
 
     private async Task LeaveCall(Device device)
@@ -314,7 +333,8 @@ internal class StateManager
             await item.RemoveEndpoint(_client, device.Configuration!.Endpoint!);
         }
 
-        _inCall.Remove(device);
+        lock (_callState)
+            _inCall.Remove(device);
     }
 
     private async Task RejectCall()
@@ -348,6 +368,7 @@ internal class StateManager
             }
         }
 
-        _inCall.Clear();
+        lock (_callState)
+            _inCall.Clear();
     }
 }
