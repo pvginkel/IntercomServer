@@ -56,7 +56,7 @@ internal static class AudioStreaming
             if (stopwatch.Elapsed - beforeRead > idleThreshold)
                 sent = stopwatch.Elapsed;
 
-            sender.Send(deviceId, endpoint, buffer.AsSpan(0, read));
+            sender.Send(deviceId, endpoint, format, buffer.AsSpan(0, read));
 
             sent += TimeSpan.FromSeconds((double)read / format.BytesPerSecond);
 

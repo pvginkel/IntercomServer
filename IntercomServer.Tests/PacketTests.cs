@@ -8,13 +8,16 @@ namespace IntercomServer.Tests;
 /// What a device's UDP listener receives: 640-byte payloads, one 20 ms chunk at mono 16 kHz
 /// 16-bit each, every one behind a 4-byte big-endian packet index. A device that advertises
 /// another rate in <c>audio_formats.out</c> is sent its sounds at that rate, in 20 ms chunks of
-/// it, each split past 1468 bytes. Each device has a counter of its own, which numbers every
-/// packet the server sends it, from every stream, and runs on from one sound to the next.
+/// it, each as the fewest equal payloads of at most 1468 bytes that carry whole samples. Each
+/// device has a counter of its own, which numbers every packet the server sends it, from every
+/// stream, and runs on from one sound to the next.
 /// </summary>
 public sealed class PacketTests
 {
     // How long nothing arrives before a test takes a sound to have ended: fifty chunks' time.
     private static readonly TimeSpan SoundEnded = TimeSpan.FromSeconds(1);
+
+    private static readonly AudioFormat Mono16Bit = new(AudioChannelLayout.Mono, 16000, 16);
 
     [Fact]
     public async Task A_sound_goes_out_in_640_byte_payloads_behind_a_big_endian_counter_that_runs_on_into_the_next_sound()
@@ -124,7 +127,7 @@ public sealed class PacketTests
                         {
                             start.SignalAndWait(TestContext.Current.CancellationToken);
                             for (var i = 0; i < datagrams; i++)
-                                sender.Send(device.DeviceId, device.AudioEndpoint, new byte[2]);
+                                sender.Send(device.DeviceId, device.AudioEndpoint, Mono16Bit, new byte[2]);
                         },
                         TaskCreationOptions.LongRunning
                     )
@@ -148,16 +151,16 @@ public sealed class PacketTests
     [Fact]
     public async Task Each_device_is_sent_its_sounds_at_the_rate_it_advertises_in_20_ms_chunks_of_it()
     {
-        // A rate and its 20 ms chunk in bytes, mono 16-bit, from the lowest rate the server
-        // produces to the highest: at 11025 Hz, 20 ms is 220.5 samples, and a chunk carries
-        // whole ones.
-        (int SampleRate, int ChunkBytes)[] formats =
+        // A rate and the payloads its 20 ms chunk goes as, mono 16-bit, from the lowest rate the
+        // server produces to the highest: at 11025 Hz, 20 ms is 220.5 samples, and a chunk
+        // carries whole ones.
+        (int SampleRate, int[] ChunkPayloads)[] formats =
         [
-            (16000, 640),
-            (8000, 320),
-            (11025, 440),
-            (48000, 1920),
-            (192000, 7680),
+            (16000, [640]),
+            (8000, [320]),
+            (11025, [440]),
+            (48000, [960, 960]),
+            (192000, [1280, 1280, 1280, 1280, 1280, 1280]),
         ];
 
         await using var harness = await ServerHarness.StartAsync();
@@ -174,7 +177,7 @@ public sealed class PacketTests
 
         await harness.RingDoorbellAsync();
 
-        foreach (var (device, (sampleRate, chunkBytes)) in devices.Zip(formats))
+        foreach (var (device, (sampleRate, chunkPayloads)) in devices.Zip(formats))
         {
             var packets = new List<AudioPacket> { await device.NextPacketAsync() };
             while (await device.NextPacketWithinAsync(SoundEnded) is { } packet)
@@ -194,22 +197,61 @@ public sealed class PacketTests
                 sent.AsSpan().SequenceEqual(decoded),
                 $"The device at {sampleRate} Hz was sent {sent.Length} bytes, not the {decoded.Length} of the doorbell decoded at its rate."
             );
-            Assert.Equal(PayloadSizes(sent.Length, chunkBytes), packets.Select(p => p.Payload.Length));
+            Assert.Equal(PayloadSizes(sent.Length, chunkPayloads), packets.Select(p => p.Payload.Length));
             Assert.Equal(Enumerable.Range(0, packets.Count), packets.Select(p => p.Index));
         }
     }
 
-    // The payloads of `bytes` sent in chunks of `chunkBytes`, each chunk split into datagrams of
-    // at most 1468 bytes, 1472 less the index.
-    private static List<int> PayloadSizes(int bytes, int chunkBytes)
+    [Fact]
+    public async Task A_write_goes_as_the_fewest_payloads_of_at_most_1468_bytes_that_differ_by_one_sample_at_most()
+    {
+        // A write's length in bytes, mono 16-bit, and the payloads it goes as.
+        (int Bytes, int[] Payloads)[] writes =
+        [
+            (2, [2]),
+            (1468, [1468]),
+            (1470, [736, 734]),
+            (1920, [960, 960]),
+            (2938, [980, 980, 978]),
+        ];
+
+        await using var harness = await ServerHarness.StartAsync();
+        var device = await harness.AddDeviceAsync("0x0a0001");
+        var sender = harness.Services.GetRequiredService<AudioSender>();
+
+        foreach (var (bytes, payloads) in writes)
+        {
+            var data = Enumerable.Range(0, bytes).Select(i => (byte)(i % 251)).ToArray();
+            sender.Send(device.DeviceId, device.AudioEndpoint, Mono16Bit, data);
+
+            var packets = await device.NextPacketsAsync(payloads.Length);
+
+            Assert.Equal(payloads, packets.Select(p => p.Payload.Length));
+            Assert.Equal(data, packets.SelectMany(p => p.Payload.ToArray()));
+        }
+        Assert.Null(await device.NextPacketWithinAsync(SoundEnded));
+    }
+
+    // The payloads of `bytes` sent in chunks that go as `chunkPayloads`, mono 16-bit. The short
+    // chunk a sound ends on goes as the fewest payloads of at most 1468 bytes, 1472 less the
+    // index, that carry whole samples, the first ones a sample longer where they cannot be equal.
+    private static List<int> PayloadSizes(int bytes, int[] chunkPayloads)
     {
         const int maxPayload = 1468;
+        var chunkBytes = chunkPayloads.Sum();
         var sizes = new List<int>();
         for (var chunkStart = 0; chunkStart < bytes; chunkStart += chunkBytes)
         {
             var chunk = Math.Min(chunkBytes, bytes - chunkStart);
-            for (var offset = 0; offset < chunk; offset += maxPayload)
-                sizes.Add(Math.Min(maxPayload, chunk - offset));
+            if (chunk == chunkBytes)
+            {
+                sizes.AddRange(chunkPayloads);
+                continue;
+            }
+            var samples = chunk / 2;
+            var count = (chunk + maxPayload - 1) / maxPayload;
+            for (var i = 0; i < count; i++)
+                sizes.Add(2 * (samples / count + (i < samples % count ? 1 : 0)));
         }
         return sizes;
     }
