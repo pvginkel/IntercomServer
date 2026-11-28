@@ -1,0 +1,8 @@
+# Every text file is stored and checked out with LF line endings, whatever the
+# platform or the committer's core.autocrlf.
+* text=auto eol=lf
+
+# The binary file types the tree holds: audio and icons.
+*.mp3 binary
+*.wav binary
+*.ico binary
